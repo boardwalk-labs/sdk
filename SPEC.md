@@ -1,0 +1,155 @@
+# SPEC — `boardwalk-sdk` (`@boardwalk/workflow`)
+
+> The authoring contract. Everything a workflow program can import, the manifest schema, and the run-event wire format. MIT. Public in **Phase 1**.
+>
+> Governing context: root [`MASTER_SPEC.md`](../MASTER_SPEC.md) §2 (workflow model), §7 (versioning). This repo defines contracts; it implements no engine behavior.
+
+## 1. Purpose
+
+`@boardwalk/workflow` is the only package a workflow author needs. It provides:
+
+1. **Primitives** — `agent()`, `sleep()`, `workflows.*`, `secrets.get()`, `artifacts.write()`, `parallel()`, `input`/`output()`/`config`, `Phase()`.
+2. **The `meta` type + manifest schema** — the Zod schema every engine and Boardwalk Cloud validate against; TS types derived from the schema, never hand-written.
+3. **The run-event wire format** — the typed event stream every engine emits.
+4. **The host interface** — the seam engines implement to back the primitives.
+
+The SDK has **zero engine knowledge**: no scheduling, no process management, no storage, no HTTP. It is a thin, typed bridge from author code to whatever engine is hosting the run.
+
+## 2. Public API surface (v1)
+
+### 2.1 Primitives
+
+```ts
+function agent<T = string>(prompt: string, opts?: AgentOptions): Promise<T>;
+
+interface AgentOptions {
+  model?: string;             // "<provider>/<model-id>"; model-id may itself contain "/" or ":".
+                              // Omitted → engine-dependent resolution (MASTER_SPEC §4).
+  provider?: string;          // Named inference provider; default: managed lane on Cloud, env-key locally.
+  schema?: JsonSchema;        // Validates parsed JSON output; run fails on mismatch.
+  tools?: readonly (string | ToolDef)[];  // Selection from meta.tools by name, plus inline program-defined tools.
+  mcp?: readonly string[];    // Selection from meta.mcp by server name.
+  skills?: readonly string[]; // Selection from meta.skills by name.
+  memory?: string;            // Workspace-relative path to a directory declared in meta.workspace.persist.
+}
+
+const workflows: {
+  call(slug: string, input: unknown, opts?: CallOptions): Promise<unknown>;  // durable, awaits child result
+  run(slug: string, input: unknown, opts?: CallOptions): Promise<string>;    // fire-and-forget, returns child run id
+};
+interface CallOptions { idempotencyKey?: string }  // default: deterministic hash(parent run, target, input)
+
+function sleep(arg: number | { durationMs: number } | { until: string | Date }): Promise<void>;
+
+const secrets: { get(name: string): Promise<string> };       // name must appear in meta.secrets
+const artifacts: {
+  write(name: string, contentType: string, body: ArtifactBody, metadata?: Record<string, unknown>): Promise<ArtifactRef>;
+};
+interface ArtifactRef { id: string; name: string; url: string }
+
+function parallel<T>(thunks: readonly (() => Promise<T>)[]): Promise<T[]>;
+function output(value: JsonValue): void;     // the run's declared result; validated against meta.output_schema
+const input: unknown;                        // live binding: the trigger payload; validated against meta.input_schema
+const config: Readonly<Record<string, JsonValue>>;  // deploy-time configuration
+function Phase(name: string, opts?: { id?: string }): void;  // named phase boundary in the run log
+```
+
+**v1 change from pre-release:** `AgentOptions.model` becomes **optional** (was required). Explicit refs behave exactly as before; omission defers to the engine (Cloud: automatic routing; local: configured default or a helpful error).
+
+**Planned (not v1):** `shell(cmd, opts?)` — exec convenience that streams output into the run event log. Until then programs use `child_process` directly; stdout/stderr are captured into the run log either way.
+
+### 2.1.1 The `agent()` capability set (v1 — required, all engines)
+
+The loop is a real agentic loop, not bare inference. Capabilities are **declared on `meta`** (so the manifest stays the contract) and **selected per call**:
+
+```ts
+// meta-level declarations
+tools?: readonly ToolGrant[];     // { name, config?, scope? } — built-in tool grants
+mcp?: readonly McpServerRef[];    // { name, transport: "stdio" | "http", command? | url?, env?: Record<string,string> }
+skills?: readonly string[];       // skill names; resolved by the engine (local: skills/ dir in the project; Cloud: org skills)
+workspace?: { persist?: true | string[] };  // persistent dirs — ALSO the memory mechanism (see below)
+
+// program-defined tools (inline in AgentOptions.tools)
+interface ToolDef {
+  name: string;
+  description: string;
+  inputSchema: JsonSchema;
+  execute(input: unknown): Promise<unknown>;  // runs in the program process; results stream as tool_call events
+}
+```
+
+- **Tools:** built-in grants by name + inline `ToolDef`s whose `execute` runs in the program process (the trusted layer — it may use `secrets.get`; only its *return value* enters model context, subject to redaction).
+- **MCP:** the loop connects to declared MCP servers and exposes their tools to the model. Server commands/URLs may reference `${{ secrets.NAME }}` in `env`.
+- **Skills:** user-authored markdown loaded into the loop's context on demand by name.
+- **Memory is not a separate system — it is a persistent directory.** `meta.workspace.persist` declares which workspace-relative directories survive across runs; `agent(prompt, { memory: "memory/triager" })` points the loop at one of them. The loop gets read/write file tools scoped to that directory and loads its index into context at turn start; the *program* may read/write the same files in plain code (seed it, inspect it, prune it). Multiple agents may use separate directories or share one. Rules: paths are workspace-relative; `..` (or any escape) is a validation error; `opts.memory` must name a declared persistent directory (or any path when `persist: true`).
+- Per-call selection defaults to **none** (a plain `agent(prompt)` is still just inference); naming anything not declared on `meta` is a validation error.
+- Secret-redaction (MASTER_SPEC §6.2) applies to all of it: tool args/results, MCP traffic, skill content, and memory content are scrubbed of known secret values before reaching the model.
+
+### 2.2 `meta` / manifest — v1 core fields
+
+See MASTER_SPEC §2.2 for the field table: `name`, `description`, `triggers` (cron `{expr, timezone?}` / manual / webhook `{auth}`), `secrets` (`{name}[]`), `env` (with `${{ secrets.NAME }}` whole-value interpolation; `BOARDWALK_*`/`AWS_*` reserved), `input_schema`, `output_schema`, `workspace.persist` (`true | string[]` — also the memory mechanism, §2.1.1), `budget` (`max_usd`/`max_tokens`/`max_duration_seconds`), `concurrency`, `tools`, `mcp`, `skills`, `runs_on`.
+
+**Cloud-extension fields** (in the schema, enforced only on Boardwalk Cloud, documented as such): `permissions`, `egress`, `callable_by`, `notifications`, `container`. Engines without the capability fail validation loudly when a workflow requires it (capability-presence rule, MASTER_SPEC §4).
+
+**Not in v1** (rejected by the schema): `instructions`, `outcome`, `eval_sample_rate`, `scripts`, `chains`, `event` triggers + `events.emit`, and any integration/connection-flavored secret variants — a secret ref is exactly `{ name }`; **secrets + env vars are the entire credential story.** Some fields may return in later minors; v1 ships the surface above and nothing silent.
+
+### 2.3 Schema rules
+
+- One Zod schema, exported; TS types derived via `z.infer`. No hand-written manifest types.
+- Unknown fields are **validation errors**.
+- Any union members ordered **most-specific-first** (Zod unions are first-match-wins and objects strip unknown keys — a less-specific variant listed first silently drops fields). Round-trip tests assert with `toEqual`, never just `toBeDefined`.
+- `meta` must be a **pure literal**; the SDK ships the static checker (`parseMeta`) the CLI and engines use to derive the manifest from a program file.
+
+### 2.4 The host interface (engine seam)
+
+The SDK's primitives delegate to a `WorkflowHost` installed by the engine before the program module is invoked:
+
+```ts
+interface WorkflowHost {
+  agent(req: AgentRequest): Promise<AgentResult>;
+  sleep(req: SleepRequest): Promise<void>;
+  callWorkflow(req: CallRequest): Promise<CallResult>;
+  getSecret(name: string): Promise<string>;
+  writeArtifact(req: ArtifactRequest): Promise<ArtifactRef>;
+  emitEvent(event: RunEventInput): void;   // Phase boundaries, output, lifecycle hooks
+  context: { runId: RunId; workflow: ManifestRef; input: unknown; config: Record<string, JsonValue> };
+}
+```
+
+This interface is **part of the public contract** (engines — including third-party ones — implement it). Calling a primitive with no host installed throws a clear "not running under a Boardwalk engine" error.
+
+### 2.5 The run-event wire format
+
+Exported types + Zod schemas for the full event union (MASTER_SPEC §2.5): envelope (`runId`, `turnId`, per-turn 1-based `seq`, `t` ms-epoch) + run-global cursor (`turnNumber * 1_000_000 + seq`); event kinds `turn_started`, `turn_ended` (`reason`, `usage?`, `error?`), `text_start/delta/end`, `tool_call_start / _input_delta / _input_complete / _executing / _result / _error`, `reasoning_delta`; `ToolReturn` (`kind?`, `humanSummary?`, `data?`), `TokenUsage`, error shape (`code`, `message`). Run-lifecycle frames (queued/running/terminal status), `Phase()` boundary frames, `output()` frames, and captured-stdout/stderr frames are part of the same union.
+
+**Channels:** every event kind maps to exactly one subscription channel — `lifecycle`, `phase`, `output`, `log`, `agent` (MASTER_SPEC §2.5). The SDK exports the `Channel` type, the kind→channel mapping, and the subscription-filter helper engines use server-side, so all engines and clients agree on what `?channels=phase,output` vs `verbose` means. Default subscription: `lifecycle + phase + output`. Cursors are global across channels — filtered subscriptions resume correctly.
+
+## 3. Internal architecture
+
+```
+src/
+  index.ts        — public exports only
+  primitives/     — one module per primitive, all delegating to the installed host
+  meta/           — WorkflowMeta types, parseMeta (pure-literal extraction), manifest derivation
+  manifest/       — the Zod schema + validation messages
+  events/         — wire-format types + schemas + cursor helpers
+  host/           — WorkflowHost interface + install/teardown + "no host" errors
+```
+
+- **Dependencies:** `zod` only. Every additional dependency needs PR justification (CODE_QUALITY §10).
+- No I/O anywhere in this package. Everything async goes through the host.
+
+## 4. Testing
+
+- Manifest schema: exhaustive valid/invalid fixtures; round-trip (`parse` → `toEqual`) for every union member; unknown-field rejection; env interpolation + reserved-prefix cases; cron expr edge cases.
+- `parseMeta`: pure-literal enforcement (rejects spreads, calls, computed values) with precise error positions.
+- Primitives: a fake host proves delegation, error propagation, and the no-host error.
+- Wire format: cursor monotonicity + resume filtering; schema round-trips for every event kind.
+
+## 5. Ready to go public when
+
+1. The API in §2 is implemented and exported — nothing more (no engine imports, no leftover undocumented exports).
+2. `npm pack` contains exactly: built JS + d.ts + README + LICENSE.
+3. Docs: every export has a docstring; README quickstart authors a workflow in <60 seconds of reading.
+4. Conformance fixtures consumed by the engine repo compile against the published types.
+5. Publication checklist (MASTER_SPEC §8) passes.
