@@ -176,6 +176,7 @@ export {
 export {
   type RunEvent,
   type RunEventKind,
+  type RunStatus,
   type Channel,
   type EventEnvelope,
   type TokenUsage,
