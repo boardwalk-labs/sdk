@@ -1,5 +1,5 @@
-# Publish to npm with provenance on a version tag (v0.1.0 → @boardwalk/workflow@0.1.0).
-# Requires: the NPM_TOKEN repo secret (an npm automation token for the @boardwalk scope).
+# Publish to npm with provenance on a version tag (v0.1.0 → @boardwalk-labs/workflow@0.1.0).
+# Requires: the NPM_TOKEN repo secret (an npm automation token for the @boardwalk-labs scope).
 # The tag must match package.json's version — the guard step enforces it.
 
 name: Release

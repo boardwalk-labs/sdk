@@ -1,8 +1,8 @@
-// @boardwalk/workflow/runtime — the ENGINE-facing API.
+// @boardwalk-labs/workflow/runtime — the ENGINE-facing API.
 //
 // An engine imports this to install the host adapter and the trigger payload BEFORE
 // evaluating a workflow program. Authors never import this — they import the hooks
-// from "@boardwalk/workflow".
+// from "@boardwalk-labs/workflow".
 
 export {
   installHost,

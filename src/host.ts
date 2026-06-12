@@ -1,6 +1,6 @@
 // The host seam — the engine-implementation boundary of the SDK.
 //
-// `@boardwalk/workflow` is a host-backed package: the hooks authors import (agent, sleep,
+// `@boardwalk-labs/workflow` is a host-backed package: the hooks authors import (agent, sleep,
 // workflows.call, secrets.get, input) are thin facades over a `WorkflowHost` the *engine*
 // installs at runtime. hosted Boardwalk installs its hosted adapter; the local engine installs
 // one backed by the developer's environment. The author's program is identical either way —
@@ -61,14 +61,14 @@ let currentHost: WorkflowHost | null = null;
 
 /**
  * The trigger payload for the current run, exposed to the program as
- * `import { input } from "@boardwalk/workflow"`. It is an ES live binding: the engine assigns
+ * `import { input } from "@boardwalk-labs/workflow"`. It is an ES live binding: the engine assigns
  * it via {@link installInput} before the program evaluates, so the import reflects the value.
  * `unknown` by contract — narrow it (e.g. with a schema) in your program.
  */
 export let input: unknown = undefined;
 
 /**
- * The run's deploy-time configuration, exposed as `import { config } from "@boardwalk/workflow"`.
+ * The run's deploy-time configuration, exposed as `import { config } from "@boardwalk-labs/workflow"`.
  * `{}` unless the deployment supplies one. Read it to vary behavior WITHOUT editing code — e.g.
  * `agent(prompt, { model: config.model ?? undefined })`. Like {@link input}, an ES live binding
  * the engine installs before the program evaluates. Frozen so a program can't mutate it.
@@ -121,9 +121,9 @@ export function resetRuntime(): void {
 export function requireHost(): WorkflowHost {
   if (currentHost === null) {
     throw new Error(
-      "@boardwalk/workflow hooks were called with no host installed. Under a Boardwalk engine " +
+      "@boardwalk-labs/workflow hooks were called with no host installed. Under a Boardwalk engine " +
         "the host is installed automatically; in tests call installHost(...) " +
-        'from "@boardwalk/workflow/runtime" first.',
+        'from "@boardwalk-labs/workflow/runtime" first.',
     );
   }
   return currentHost;

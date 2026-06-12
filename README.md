@@ -1,9 +1,9 @@
-# @boardwalk/workflow
+# @boardwalk-labs/workflow
 
 Author **Boardwalk workflows** in plain TypeScript — agent loops, schedules, durable sleeps, and cross-workflow composition, in a single program file that runs identically on your laptop, your own server, or the hosted Boardwalk platform.
 
 ```ts
-import { agent, output, secrets, type WorkflowMeta } from "@boardwalk/workflow";
+import { agent, output, secrets, type WorkflowMeta } from "@boardwalk-labs/workflow";
 
 export const meta = {
   name: "morning-digest",
@@ -27,9 +27,9 @@ A workflow is **a script**: the `meta` export is a **pure literal** (engines der
 
 | Import                        | What it is                                                                                                                                                                                                    |
 | ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@boardwalk/workflow`         | The author API: `agent()`, `sleep()`, `workflows.call()`, `secrets.get()`, `artifacts.write()`, `parallel()`, `input` / `output()` / `config`, `Phase()` — plus the manifest schema and run-event wire format |
-| `@boardwalk/workflow/runtime` | The **engine-facing** API: install a `WorkflowHost` before evaluating a program. Authors never import this                                                                                                    |
-| `@boardwalk/workflow/extract` | Static `meta` → manifest extraction (AST-based, never executes the program). Used by engines and tooling                                                                                                      |
+| `@boardwalk-labs/workflow`         | The author API: `agent()`, `sleep()`, `workflows.call()`, `secrets.get()`, `artifacts.write()`, `parallel()`, `input` / `output()` / `config`, `Phase()` — plus the manifest schema and run-event wire format |
+| `@boardwalk-labs/workflow/runtime` | The **engine-facing** API: install a `WorkflowHost` before evaluating a program. Authors never import this                                                                                                    |
+| `@boardwalk-labs/workflow/extract` | Static `meta` → manifest extraction (AST-based, never executes the program). Used by engines and tooling                                                                                                      |
 
 ## The primitives, in one minute
 

@@ -1,6 +1,6 @@
-// @boardwalk/workflow — the author-facing API a workflow program imports.
+// @boardwalk-labs/workflow — the author-facing API a workflow program imports.
 //
-//   import { agent, workflows, sleep, secrets, input, type WorkflowMeta } from "@boardwalk/workflow"
+//   import { agent, workflows, sleep, secrets, input, type WorkflowMeta } from "@boardwalk-labs/workflow"
 //
 //   export const meta = { name: "x", triggers: [{ kind: "manual" }] } satisfies WorkflowMeta
 //

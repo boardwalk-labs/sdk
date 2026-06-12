@@ -1,4 +1,4 @@
-// @boardwalk/workflow/extract — static extraction of a workflow program's `meta` → manifest.
+// @boardwalk-labs/workflow/extract — static extraction of a workflow program's `meta` → manifest.
 //
 // A workflow is a TS/JS program file whose `export const meta = { … }` is a PURE LITERAL.
 // Engines and tooling must derive the manifest WITHOUT executing the program, so this module
@@ -14,7 +14,7 @@
 // deliberately unsupported; type the literal with `satisfies WorkflowMeta` instead.)
 //
 // This module executes none of the program. It is pure logic — tested exhaustively. It is a
-// subpath export (`@boardwalk/workflow/extract`) consumed by engines and the CLI; author
+// subpath export (`@boardwalk-labs/workflow/extract`) consumed by engines and the CLI; author
 // programs never import it.
 
 import ts from "typescript";

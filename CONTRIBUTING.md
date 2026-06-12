@@ -1,4 +1,4 @@
-# Contributing to @boardwalk/workflow
+# Contributing to @boardwalk-labs/workflow
 
 Thanks for helping build the authoring contract. This package defines what every Boardwalk
 engine agrees on — the primitives, the manifest schema, the run-event wire format — so changes

@@ -20,7 +20,7 @@ describe("extractMetaLiteral", () => {
 
   it("unwraps `satisfies`, `as const`, and parentheses", () => {
     const src = `
-      import type { WorkflowMeta } from "@boardwalk/workflow";
+      import type { WorkflowMeta } from "@boardwalk-labs/workflow";
       export const meta = ({
         name: "x",
         triggers: [{ kind: "manual" }] as const,

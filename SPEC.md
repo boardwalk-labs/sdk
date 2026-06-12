@@ -1,4 +1,4 @@
-# SPEC — `boardwalk-sdk` (`@boardwalk/workflow`)
+# SPEC — `boardwalk-sdk` (`@boardwalk-labs/workflow`)
 
 > The authoring contract. Everything a workflow program can import, the manifest schema, and the run-event wire format. MIT. Public in **Phase 1**.
 >
@@ -6,7 +6,7 @@
 
 ## 1. Purpose
 
-`@boardwalk/workflow` is the only package a workflow author needs. It provides:
+`@boardwalk-labs/workflow` is the only package a workflow author needs. It provides:
 
 1. **Primitives** — `agent()`, `sleep()`, `workflows.*`, `secrets.get()`, `artifacts.write()`, `parallel()`, `input`/`output()`/`config`, `Phase()`.
 2. **The `meta` type + manifest schema** — the Zod schema every engine and hosted Boardwalk validate against; TS types derived from the schema, never hand-written.
@@ -109,7 +109,7 @@ See [`MASTER_SPEC.md`](../MASTER_SPEC.md) §2.2 for the field table: `name`, `de
 - One Zod schema, exported; TS types derived via `z.infer`. No hand-written manifest types.
 - Unknown fields are **validation errors**.
 - Any union members ordered **most-specific-first** (Zod unions are first-match-wins and objects strip unknown keys — a less-specific variant listed first silently drops fields). Round-trip tests assert with `toEqual`, never just `toBeDefined`.
-- `meta` must be a **pure literal**; the SDK ships the static extractor (`extractMetaLiteral` / `extractManifest` on the `@boardwalk/workflow/extract` subpath) the CLI and engines use to derive the manifest from a program file without executing it.
+- `meta` must be a **pure literal**; the SDK ships the static extractor (`extractMetaLiteral` / `extractManifest` on the `@boardwalk-labs/workflow/extract` subpath) the CLI and engines use to derive the manifest from a program file without executing it.
 
 ### 2.4 The host interface (engine seam)
 
@@ -128,7 +128,7 @@ interface WorkflowHost {
 }
 ```
 
-The engine installs the host (plus `input`/`config` live bindings) via `@boardwalk/workflow/runtime` (`installHost` / `installInput` / `installConfig`) before evaluating the program, and reads the declared output afterwards (`takeDeclaredOutput`). State is a module-level singleton — Node ESM module caching guarantees the program and engine share one instance. This interface is **part of the public contract** (engines — including third-party ones — implement it). Calling a primitive with no host installed throws a clear "no host installed" error.
+The engine installs the host (plus `input`/`config` live bindings) via `@boardwalk-labs/workflow/runtime` (`installHost` / `installInput` / `installConfig`) before evaluating the program, and reads the declared output afterwards (`takeDeclaredOutput`). State is a module-level singleton — Node ESM module caching guarantees the program and engine share one instance. This interface is **part of the public contract** (engines — including third-party ones — implement it). Calling a primitive with no host installed throws a clear "no host installed" error.
 
 ### 2.5 The run-event wire format
 
