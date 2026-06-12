@@ -1,6 +1,7 @@
-# Publish to npm with provenance on a version tag (v0.1.0 → @boardwalk-labs/workflow@0.1.0).
-# Requires: the NPM_TOKEN repo secret (an npm automation token for the @boardwalk-labs scope).
-# The tag must match package.json's version — the guard step enforces it.
+# Publish to npm with provenance on a version tag (v0.1.0 -> @boardwalk-labs/workflow@0.1.0).
+# Auth: npm Trusted Publishing via GitHub OIDC (no stored token). Configure the trusted publisher
+# for @boardwalk-labs/workflow on npmjs.com: org boardwalk-labs, repo boardwalk-labs/sdk,
+# workflow .github/workflows/release.yml. The tag must match package.json's version (guard below).
 
 name: Release
 
@@ -38,6 +39,6 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
+      # Trusted Publishing needs a recent npm (>= 11.5.1); node 24's bundled npm may be older.
+      - run: npm install -g npm@latest
       - run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
