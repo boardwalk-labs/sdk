@@ -98,7 +98,7 @@ interface ToolDef {
 
 ### 2.2 `meta` / manifest — v1 core fields
 
-See MASTER*SPEC §2.2 for the field table: `name`, `description`, `triggers` (cron `{expr, timezone?}` / manual / webhook `{auth}`), `secrets` (`{name}[]`), `env` (with `${{ secrets.NAME }}` whole-value interpolation; `BOARDWALK*_`/`AWS\__`reserved),`input_schema`, `output_schema`, `workspace.persist` (`true | string[]`— also the memory mechanism, §2.1.1),`budget` (`max_usd`/`max_tokens`/`max_duration_seconds`), `concurrency`, `tools`, `mcp`, `skills`, `runs_on`.
+See MASTER*SPEC §2.2 for the field table: `name`, `description`, `triggers` (cron `{expr, timezone?}` / manual / webhook `{auth}`), `secrets` (`{name}[]`), `env` (with `${{ secrets.NAME }}` whole-value interpolation; `BOARDWALK*\_`/`AWS\_\_`reserved),`input_schema`, `output_schema`, `workspace.persist` (`true | string[]`— also the memory mechanism, §2.1.1),`budget` (`max_usd`/`max_tokens`/`max_duration_seconds`), `concurrency`, `tools`, `mcp`, `skills`, `runs_on`.
 
 **Cloud-extension fields** (in the schema, enforced only on Boardwalk Cloud, documented as such): `permissions`, `egress`, `callable_by`, `notifications`, `container`. Engines without the capability fail validation loudly when a workflow requires it (capability-presence rule, MASTER_SPEC §4).
 

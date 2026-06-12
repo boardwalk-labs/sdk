@@ -27,11 +27,11 @@ The `meta` export is a **pure literal** — engines derive the workflow's manife
 
 ## What's in this package
 
-| Import | What it is |
-|---|---|
-| `@boardwalk/workflow` | The author API: `agent()`, `sleep()`, `workflows.call()`, `secrets.get()`, `artifacts.write()`, `parallel()`, `input` / `output()` / `config`, `Phase()` — plus the manifest schema and run-event wire format |
-| `@boardwalk/workflow/runtime` | The **engine-facing** API: install a `WorkflowHost` before evaluating a program. Authors never import this |
-| `@boardwalk/workflow/extract` | Static `meta` → manifest extraction (AST-based, never executes the program). Used by engines and tooling |
+| Import                        | What it is                                                                                                                                                                                                    |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `@boardwalk/workflow`         | The author API: `agent()`, `sleep()`, `workflows.call()`, `secrets.get()`, `artifacts.write()`, `parallel()`, `input` / `output()` / `config`, `Phase()` — plus the manifest schema and run-event wire format |
+| `@boardwalk/workflow/runtime` | The **engine-facing** API: install a `WorkflowHost` before evaluating a program. Authors never import this                                                                                                    |
+| `@boardwalk/workflow/extract` | Static `meta` → manifest extraction (AST-based, never executes the program). Used by engines and tooling                                                                                                      |
 
 ## The primitives, in one minute
 
