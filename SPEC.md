@@ -109,7 +109,7 @@ See MASTER*SPEC §2.2 for the field table: `name`, `description`, `triggers` (cr
 - One Zod schema, exported; TS types derived via `z.infer`. No hand-written manifest types.
 - Unknown fields are **validation errors**.
 - Any union members ordered **most-specific-first** (Zod unions are first-match-wins and objects strip unknown keys — a less-specific variant listed first silently drops fields). Round-trip tests assert with `toEqual`, never just `toBeDefined`.
-- `meta` must be a **pure literal**; the SDK ships the static checker (`parseMeta`) the CLI and engines use to derive the manifest from a program file.
+- `meta` must be a **pure literal**; the SDK ships the static extractor (`extractMetaLiteral` / `extractManifest` on the `@boardwalk/workflow/extract` subpath) the CLI and engines use to derive the manifest from a program file without executing it.
 
 ### 2.4 The host interface (engine seam)
 
@@ -117,22 +117,18 @@ The SDK's primitives delegate to a `WorkflowHost` installed by the engine before
 
 ```ts
 interface WorkflowHost {
-  agent(req: AgentRequest): Promise<AgentResult>;
-  sleep(req: SleepRequest): Promise<void>;
-  callWorkflow(req: CallRequest): Promise<CallResult>;
+  agent(prompt: string, opts: AgentOptions | undefined): Promise<unknown>;
+  callWorkflow(slug: string, input: unknown, opts: CallOptions | undefined): Promise<unknown>;
+  sleep(arg: SleepArg): Promise<void>;
   getSecret(name: string): Promise<string>;
-  writeArtifact(req: ArtifactRequest): Promise<ArtifactRef>;
-  emitEvent(event: RunEventInput): void; // Phase boundaries, output, lifecycle hooks
-  context: {
-    runId: RunId;
-    workflow: ManifestRef;
-    input: unknown;
-    config: Record<string, JsonValue>;
-  };
+  // Optional capabilities — hooks throw a clear "not supported" error when absent:
+  setPhase?(name: string, opts: PhaseOptions | undefined): void;
+  runWorkflow?(slug: string, input: unknown, opts: CallOptions | undefined): Promise<string>;
+  writeArtifact?(name, contentType, body, metadata): Promise<ArtifactRef>;
 }
 ```
 
-This interface is **part of the public contract** (engines — including third-party ones — implement it). Calling a primitive with no host installed throws a clear "not running under a Boardwalk engine" error.
+The engine installs the host (plus `input`/`config` live bindings) via `@boardwalk/workflow/runtime` (`installHost` / `installInput` / `installConfig`) before evaluating the program, and reads the declared output afterwards (`takeDeclaredOutput`). State is a module-level singleton — Node ESM module caching guarantees the program and engine share one instance. This interface is **part of the public contract** (engines — including third-party ones — implement it). Calling a primitive with no host installed throws a clear "no host installed" error.
 
 ### 2.5 The run-event wire format
 
@@ -144,21 +140,23 @@ Exported types + Zod schemas for the full event union (MASTER_SPEC §2.5): envel
 
 ```
 src/
-  index.ts        — public exports only
-  primitives/     — one module per primitive, all delegating to the installed host
-  meta/           — WorkflowMeta types, parseMeta (pure-literal extraction), manifest derivation
-  manifest/       — the Zod schema + validation messages
-  events/         — wire-format types + schemas + cursor helpers
-  host/           — WorkflowHost interface + install/teardown + "no host" errors
+  index.ts        — the author-facing hooks + public exports
+  types.ts        — option/argument types (AgentOptions, ToolDef, SleepArg, …)
+  meta.ts         — WorkflowMeta + trigger/capability/cloud-extension types
+  host.ts         — WorkflowHost interface + singleton install/teardown + "no host" errors
+  runtime.ts      — the engine-facing subpath export (/runtime)
+  manifest.ts     — the Zod schema, validateMeta, MetaValidationError
+  events.ts       — wire-format schemas + channels + cursor helpers
+  extract.ts      — pure-literal AST extraction (the /extract subpath export)
 ```
 
-- **Dependencies:** `zod` only. Every additional dependency needs PR justification (CODE_QUALITY §10).
+- **Dependencies:** `zod` (schemas) and `typescript` (the `/extract` AST parser — engines and the CLI need extraction; authors already have TypeScript to author with). Every additional dependency needs PR justification (CODE_QUALITY §10).
 - No I/O anywhere in this package. Everything async goes through the host.
 
 ## 4. Testing
 
 - Manifest schema: exhaustive valid/invalid fixtures; round-trip (`parse` → `toEqual`) for every union member; unknown-field rejection; env interpolation + reserved-prefix cases; cron expr edge cases.
-- `parseMeta`: pure-literal enforcement (rejects spreads, calls, computed values) with precise error positions.
+- Extraction: pure-literal enforcement (rejects spreads, calls, shorthand, computed keys, template interpolation, array holes) with precise `file:line:col` error positions; `satisfies`/`as const` unwrapping.
 - Primitives: a fake host proves delegation, error propagation, and the no-host error.
 - Wire format: cursor monotonicity + resume filtering; schema round-trips for every event kind.
 
