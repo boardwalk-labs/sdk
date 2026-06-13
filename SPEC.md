@@ -2,7 +2,7 @@
 
 > The authoring contract. Everything a workflow program can import, the manifest schema, and the run-event wire format. MIT. Public in **Phase 1**.
 >
-> Governing context: root [`MASTER_SPEC.md`](../MASTER_SPEC.md) §2 (workflow model), §7 (versioning). This repo defines contracts; it implements no engine behavior.
+> Scope: the workflow model and versioning. This repo defines contracts; it implements no engine behavior.
 
 ## 1. Purpose
 
@@ -94,13 +94,13 @@ interface ToolDef {
 - **Skills:** user-authored markdown loaded into the loop's context by name, resolved from the `skills/` directory deployed alongside the program (`skills/<name>.md`). A missing skill file fails loudly at call time.
 - **Memory is not a separate system — it is a persistent directory, per agent.** `agent(prompt, { memory: "memory/triager" })` points the loop at a workspace-relative directory; the **engine persists every memory directory automatically across runs** (hydrated at run start, written back at successful run end — no declaration anywhere). The loop gets read/write file tools scoped to that directory and loads its index into context at turn start; the _program_ may read/write the same files in plain code (seed it, inspect it, prune it). Multiple agents may use separate directories or deliberately share one. Rules: paths are workspace-relative; `..` (or any escape) is a validation error. `workspace.persist` remains the separate, program-level persistence knob for non-memory state.
 - Per-call selection defaults to **none** (a plain `agent(prompt)` is still just inference); an unknown built-in tool or a missing skill file is a loud error, never silent degradation.
-- Secret-redaction (MASTER_SPEC §6.2) applies to all of it: tool args/results, MCP traffic, skill content, and memory content are scrubbed of known secret values before reaching the model.
+- Secret-redaction applies to all of it: tool args/results, MCP traffic, skill content, and memory content are scrubbed of known secret values before reaching the model.
 
 ### 2.2 `meta` / manifest — v1 core fields
 
-See [`MASTER_SPEC.md`](../MASTER_SPEC.md) §2.2 for the field table: `name`, `description`, `triggers` (cron `{expr, timezone?}` / manual / webhook `{auth}`), `secrets` (`{name}[]`), `env` (with `${{ secrets.NAME }}` whole-value interpolation; `BOARDWALK_*` / `AWS_*` reserved), `input_schema`, `output_schema`, `workspace.persist` (`true | string[]` — program-level persistence; agent memory is auto-persisted separately, §2.1.1), `budget` (`max_usd` / `max_tokens` / `max_duration_seconds`), `concurrency`, `runs_on`. There are **no capability manifest fields** (`tools` / `mcp` / `skills`) — all agent capabilities are per-agent (§2.1.1).
+The manifest field table: `name`, `description`, `triggers` (cron `{expr, timezone?}` / manual / webhook `{auth}`), `secrets` (`{name}[]`), `env` (with `${{ secrets.NAME }}` whole-value interpolation; `BOARDWALK_*` / `AWS_*` reserved), `input_schema`, `output_schema`, `workspace.persist` (`true | string[]` — program-level persistence; agent memory is auto-persisted separately, §2.1.1), `budget` (`max_usd` / `max_tokens` / `max_duration_seconds`), `concurrency`, `runs_on`. There are **no capability manifest fields** (`tools` / `mcp` / `skills`) — all agent capabilities are per-agent (§2.1.1).
 
-**Platform-extension fields** (in the schema, enforced only on hosted Boardwalk, documented as such): `permissions`, `egress`, `callable_by`, `notifications`, `container`. Engines without the capability fail validation loudly when a workflow requires it (capability-presence rule, MASTER_SPEC §4).
+**Platform-extension fields** (in the schema, enforced only on hosted Boardwalk, documented as such): `permissions`, `egress`, `callable_by`, `notifications`, `container`. Engines without the capability fail validation loudly when a workflow requires it (capability-presence rule).
 
 **Not in v1** (rejected by the schema): `instructions`, `outcome`, `eval_sample_rate`, `scripts`, `chains`, `event` triggers + `events.emit`, and any integration/connection-flavored secret variants — a secret ref is exactly `{ name }`; **secrets + env vars are the entire credential story.** Some fields may return in later minors; v1 ships the surface above and nothing silent.
 
@@ -132,9 +132,9 @@ The engine installs the host (plus `input`/`config` live bindings) via `@boardwa
 
 ### 2.5 The run-event wire format
 
-Exported types + Zod schemas for the full event union (MASTER_SPEC §2.5): envelope (`runId`, `turnId`, per-turn 1-based `seq`, `t` ms-epoch) + run-global cursor (`turnNumber * 1_000_000 + seq`); event kinds `turn_started`, `turn_ended` (both carry the leaf's `agentId` + optional `agentName`; `turn_ended` adds `reason`, `usage?`, `error?`), `text_start/delta/end`, `tool_call_start / _input_delta / _input_complete / _executing / _result / _error`, `reasoning_delta`; `ToolReturn` (`kind?`, `humanSummary?`, `data?`), `TokenUsage`, error shape (`code`, `message`). Run-lifecycle frames (queued/running/terminal status), `Phase()` boundary frames, `output()` frames, and captured-stdout/stderr frames are part of the same union.
+Exported types + Zod schemas for the full event union: envelope (`runId`, `turnId`, per-turn 1-based `seq`, `t` ms-epoch) + run-global cursor (`turnNumber * 1_000_000 + seq`); event kinds `turn_started`, `turn_ended` (both carry the leaf's `agentId` + optional `agentName`; `turn_ended` adds `reason`, `usage?`, `error?`), `text_start/delta/end`, `tool_call_start / _input_delta / _input_complete / _executing / _result / _error`, `reasoning_delta`; `ToolReturn` (`kind?`, `humanSummary?`, `data?`), `TokenUsage`, error shape (`code`, `message`). Run-lifecycle frames (queued/running/terminal status), `Phase()` boundary frames, `output()` frames, and captured-stdout/stderr frames are part of the same union.
 
-**Channels:** every event kind maps to exactly one subscription channel — `lifecycle`, `phase`, `output`, `log`, `agent` (MASTER_SPEC §2.5). The SDK exports the `Channel` type, the kind→channel mapping, and the subscription-filter helper engines use server-side, so all engines and clients agree on what `?channels=phase,output` vs `verbose` means. Default subscription: `lifecycle + phase + output`. Cursors are global across channels — filtered subscriptions resume correctly.
+**Channels:** every event kind maps to exactly one subscription channel — `lifecycle`, `phase`, `output`, `log`, `agent`. The SDK exports the `Channel` type, the kind→channel mapping, and the subscription-filter helper engines use server-side, so all engines and clients agree on what `?channels=phase,output` vs `verbose` means. Default subscription: `lifecycle + phase + output`. Cursors are global across channels — filtered subscriptions resume correctly.
 
 ## 3. Internal architecture
 
@@ -150,7 +150,7 @@ src/
   extract.ts      — pure-literal AST extraction (the /extract subpath export)
 ```
 
-- **Dependencies:** `zod` (schemas) and `typescript` (the `/extract` AST parser — engines and the CLI need extraction; authors already have TypeScript to author with). Every additional dependency needs PR justification (CODE_QUALITY §10).
+- **Dependencies:** `zod` (schemas) and `typescript` (the `/extract` AST parser — engines and the CLI need extraction; authors already have TypeScript to author with). Every additional dependency needs PR justification.
 - No I/O anywhere in this package. Everything async goes through the host.
 
 ## 4. Testing
@@ -166,4 +166,4 @@ src/
 2. `npm pack` contains exactly: built JS + d.ts + README + LICENSE.
 3. Docs: every export has a docstring; README quickstart authors a workflow in <60 seconds of reading.
 4. Conformance fixtures consumed by the engine repo compile against the published types.
-5. Publication checklist (MASTER_SPEC §8) passes.
+5. Publication checklist passes.
