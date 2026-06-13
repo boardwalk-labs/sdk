@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 
-// Option/argument types for the workflow hooks (Phase, agent, workflows.call, sleep, secrets).
+// Option/argument types for the workflow hooks (phase, agent, workflows.call, sleep, secrets).
 
 import type { McpServerRef } from "./meta.js";
 
@@ -108,7 +108,7 @@ export interface CallOptions {
  */
 export type SleepArg = number | { durationMs: number } | { until: string | Date };
 
-/** Options for {@link import("./index.js").Phase}, the run-timeline marker. */
+/** Options for {@link import("./index.js").phase}, the run-timeline marker. */
 export interface PhaseOptions {
   /**
    * Optional stable identifier for the phase. Omit for the engine to assign one in marker order.

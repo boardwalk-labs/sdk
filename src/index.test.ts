@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { agent, artifacts, output, parallel, Phase, secrets, sleep, workflows } from "./index.js";
+import { agent, artifacts, output, parallel, phase, secrets, sleep, workflows } from "./index.js";
 import {
   installConfig,
   installHost,
@@ -69,7 +69,7 @@ describe("workflows", () => {
   });
 });
 
-describe("sleep / secrets / Phase / artifacts", () => {
+describe("sleep / secrets / phase / artifacts", () => {
   it("sleep delegates every arg form", async () => {
     const sleepFn = vi.fn().mockResolvedValue(undefined);
     installHost(makeHost({ sleep: sleepFn }));
@@ -84,15 +84,15 @@ describe("sleep / secrets / Phase / artifacts", () => {
     await expect(secrets.get("GITHUB_TOKEN")).resolves.toBe("s3cret");
   });
 
-  it("Phase throws when the engine has no setPhase", () => {
+  it("phase throws when the engine has no setPhase", () => {
     installHost(makeHost());
-    expect(() => Phase("plan")).toThrow(/not supported/);
+    expect(() => phase("plan")).toThrow(/not supported/);
   });
 
-  it("Phase delegates when supported", () => {
+  it("phase delegates when supported", () => {
     const setPhase = vi.fn();
     installHost(makeHost({ setPhase }));
-    Phase("plan", { id: "p1" });
+    phase("plan", { id: "p1" });
     expect(setPhase).toHaveBeenCalledWith("plan", { id: "p1" });
   });
 

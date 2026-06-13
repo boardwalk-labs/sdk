@@ -8,7 +8,7 @@
 
 `@boardwalk-labs/workflow` is the only package a workflow author needs. It provides:
 
-1. **Primitives** — `agent()`, `sleep()`, `workflows.*`, `secrets.get()`, `artifacts.write()`, `parallel()`, `input`/`output()`/`config`, `Phase()`.
+1. **Primitives** — `agent()`, `sleep()`, `workflows.*`, `secrets.get()`, `artifacts.write()`, `parallel()`, `input`/`output()`/`config`, `phase()`.
 2. **The `meta` type + manifest schema** — the Zod schema every engine and hosted Boardwalk validate against; TS types derived from the schema, never hand-written.
 3. **The run-event wire format** — the typed event stream every engine emits.
 4. **The host interface** — the seam engines implement to back the primitives.
@@ -62,7 +62,7 @@ function parallel<T>(thunks: readonly (() => Promise<T>)[]): Promise<T[]>;
 function output(value: JsonValue): void; // the run's declared result; validated against meta.output_schema
 const input: unknown; // live binding: the trigger payload; validated against meta.input_schema
 const config: Readonly<Record<string, JsonValue>>; // deploy-time configuration
-function Phase(name: string, opts?: { id?: string }): void; // named phase boundary in the run log
+function phase(name: string, opts?: { id?: string }): void; // named phase boundary in the run log
 ```
 
 **v1 change from pre-release:** `AgentOptions.model` becomes **optional** (was required), and `provider`/`model` are fully **orthogonal** (decided 2026-06-12): `provider` picks who fulfills the call; `model` is an opaque string passed **verbatim** to that provider — engines never parse, prefix, or rewrite it, and nothing in the model string ever selects credentials. **Default provider = `boardwalk` on every engine:** omission of `model` routes automatically through the managed lane, which works when the engine holds a Boardwalk credential (hosted: ambient; local engines: `BOARDWALK_API_KEY` / the `boardwalk login` account where a login flow exists) — otherwise an actionable error names every fix (set the credential, or name a provider). BYO keys are used only when the call names a non-`boardwalk` provider explicitly.
@@ -132,7 +132,7 @@ The engine installs the host (plus `input`/`config` live bindings) via `@boardwa
 
 ### 2.5 The run-event wire format
 
-Exported types + Zod schemas for the full event union: envelope (`runId`, `turnId`, per-turn 1-based `seq`, `t` ms-epoch) + run-global cursor (`turnNumber * 1_000_000 + seq`); event kinds `turn_started`, `turn_ended` (both carry the leaf's `agentId` + optional `agentName`; `turn_ended` adds `reason`, `usage?`, `error?`), `text_start/delta/end`, `tool_call_start / _input_delta / _input_complete / _executing / _result / _error`, `reasoning_delta`; `ToolReturn` (`kind?`, `humanSummary?`, `data?`), `TokenUsage`, error shape (`code`, `message`). Run-lifecycle frames (queued/running/terminal status), `Phase()` boundary frames, `output()` frames, and captured-stdout/stderr frames are part of the same union.
+Exported types + Zod schemas for the full event union: envelope (`runId`, `turnId`, per-turn 1-based `seq`, `t` ms-epoch) + run-global cursor (`turnNumber * 1_000_000 + seq`); event kinds `turn_started`, `turn_ended` (both carry the leaf's `agentId` + optional `agentName`; `turn_ended` adds `reason`, `usage?`, `error?`), `text_start/delta/end`, `tool_call_start / _input_delta / _input_complete / _executing / _result / _error`, `reasoning_delta`; `ToolReturn` (`kind?`, `humanSummary?`, `data?`), `TokenUsage`, error shape (`code`, `message`). Run-lifecycle frames (queued/running/terminal status), `phase()` boundary frames, `output()` frames, and captured-stdout/stderr frames are part of the same union.
 
 **Channels:** every event kind maps to exactly one subscription channel — `lifecycle`, `phase`, `output`, `log`, `agent`. The SDK exports the `Channel` type, the kind→channel mapping, and the subscription-filter helper engines use server-side, so all engines and clients agree on what `?channels=phase,output` vs `verbose` means. Default subscription: `lifecycle + phase + output`. Cursors are global across channels — filtered subscriptions resume correctly.
 

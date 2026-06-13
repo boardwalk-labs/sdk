@@ -26,13 +26,13 @@ import type {
 
 /**
  * Mark the current run phase for live-tail and run-log grouping. Everything after this call
- * belongs to the named phase until the next `Phase(...)` marker or the run ends. This is
+ * belongs to the named phase until the next `phase(...)` marker or the run ends. This is
  * observability-only; it does not checkpoint or skip code on restart.
  */
-export function Phase(name: string, opts?: PhaseOptions): void {
+export function phase(name: string, opts?: PhaseOptions): void {
   const host = requireHost();
   if (host.setPhase === undefined) {
-    throw new Error("Phase is not supported by the installed engine");
+    throw new Error("phase is not supported by the installed engine");
   }
   host.setPhase(name, opts);
 }

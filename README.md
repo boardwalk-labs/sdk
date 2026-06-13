@@ -27,7 +27,7 @@ A workflow is **a script**: the `meta` export is a **pure literal** (engines der
 
 | Import                             | What it is                                                                                                                                                                                                    |
 | ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@boardwalk-labs/workflow`         | The author API: `agent()`, `sleep()`, `workflows.call()`, `secrets.get()`, `artifacts.write()`, `parallel()`, `input` / `output()` / `config`, `Phase()` — plus the manifest schema and run-event wire format |
+| `@boardwalk-labs/workflow`         | The author API: `agent()`, `sleep()`, `workflows.call()`, `secrets.get()`, `artifacts.write()`, `parallel()`, `input` / `output()` / `config`, `phase()` — plus the manifest schema and run-event wire format |
 | `@boardwalk-labs/workflow/runtime` | The **engine-facing** API: install a `WorkflowHost` before evaluating a program. Authors never import this                                                                                                    |
 | `@boardwalk-labs/workflow/extract` | Static `meta` → manifest extraction (AST-based, never executes the program). Used by engines and tooling                                                                                                      |
 
