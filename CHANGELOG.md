@@ -4,6 +4,14 @@ Notable changes to `@boardwalk-labs/workflow` — the workflow authoring contrac
 the `meta` → manifest schema, the run-event wire format). Pre-1.0, additive changes ship as
 patch releases.
 
+## 0.1.8
+
+### Added
+
+- `tool_output_delta` run-event kind (`toolCallId`, `stream: "stdout" | "stderr"`, `text`) on the
+  `agent` channel — streams a tool's output as it is produced (e.g. a long `bash` command). The
+  final `tool_call_result` still carries the complete bounded output; deltas are the live view.
+
 ## 0.1.6
 
 ### Changed
