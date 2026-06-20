@@ -4,6 +4,20 @@ Notable changes to `@boardwalk-labs/workflow` — the workflow authoring contrac
 the `meta` → manifest schema, the run-event wire format). Pre-1.0, additive changes ship as
 patch releases.
 
+## 0.1.13
+
+### Added
+
+- `budget.deadline_seconds` — a WALL-CLOCK cap (including suspended idle) distinct from
+  `max_duration_seconds`, which is now defined as ACTIVE COMPUTE time only (a long sleep,
+  human-input gate, or child-wait does NOT burn it). Use the two together for "cap runaway compute
+  AND give up if the whole thing isn't done within N real-world seconds."
+- `@boardwalk-labs/workflow/lint` — `lintDeterminism(source)`, a shared, AST-based determinism lint
+  (the CLI, the engines, and the hosted deploy all call it). Flags bare `Date.now` / `Math.random`
+  / `new Date()` / `performance.now` / `fetch` that sit OUTSIDE a journaled seam (`step.run` /
+  `agent`), where a restart/resume would re-run them with a different value. Advisory — it returns
+  warnings, it never blocks.
+
 ## 0.1.12
 
 ### Added

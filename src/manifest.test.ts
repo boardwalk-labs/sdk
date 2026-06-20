@@ -51,7 +51,7 @@ describe("workflowManifestSchema — core", () => {
       permissions: { secrets: [{ name: "GITHUB_TOKEN" }] },
       env: { LOG_LEVEL: "info", GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}" },
       workspace: { persist: ["memory/triager", "cache"] },
-      budget: { max_usd: 2.5, max_duration_seconds: 600 },
+      budget: { max_usd: 2.5, max_duration_seconds: 600, deadline_seconds: 86400 },
       concurrency: { mode: "serial" },
     };
     // toEqual on the WHOLE object — the union-stripping failure mode this repo guards against drops

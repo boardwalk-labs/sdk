@@ -143,7 +143,15 @@ const workspaceSchema = z.strictObject({
 const budgetSchema = z.strictObject({
   max_tokens: z.number().int().positive().optional(),
   max_usd: z.number().positive().finite().optional(),
+  // ACTIVE COMPUTE time — only on-CPU execution counts; a run parked in a long sleep, a
+  // human-input gate, or a child-wait does NOT burn this (a run intentionally suspended for a day
+  // must not blow its compute budget on resume). This is the runaway / cost cap.
   max_duration_seconds: z.number().int().positive().optional(),
+  // WALL-CLOCK time from the run's start, INCLUDING suspended idle — the staleness / SLA cap:
+  // "give up if this run hasn't finished within N real-world seconds, even if it has just been
+  // waiting." Orthogonal to max_duration_seconds (e.g. an approval that legitimately waits hours
+  // but is pointless after a day: a small max_duration_seconds + a large deadline_seconds).
+  deadline_seconds: z.number().int().positive().optional(),
 });
 
 const concurrencySchema = z.union([
