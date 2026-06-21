@@ -27,6 +27,17 @@ describe("workflowManifestSchema — core", () => {
     // keeps the typed binding referenced so it isn't flagged unused.
     const keysMatch: Expect<TypeEquals<keyof WorkflowMeta, keyof WorkflowManifest>> = true;
     expect(keysMatch).toBe(true);
+
+    // The top-level guard above only compares the outermost key set, so a field added to a NESTED
+    // object on one side and not the other still drifts silently (this is how `budget.deadline_seconds`
+    // landed in the schema but not the interface). Guard the nested objects that are plain records.
+    const budgetKeysMatch: Expect<
+      TypeEquals<
+        keyof NonNullable<WorkflowMeta["budget"]>,
+        keyof NonNullable<WorkflowManifest["budget"]>
+      >
+    > = true;
+    expect(budgetKeysMatch).toBe(true);
   });
 
   it("accepts a minimal manifest and applies defaults", () => {
@@ -53,7 +64,7 @@ describe("workflowManifestSchema — core", () => {
       workspace: { persist: ["memory/triager", "cache"] },
       budget: { max_usd: 2.5, max_duration_seconds: 600, deadline_seconds: 86400 },
       concurrency: { mode: "serial" },
-    };
+    } satisfies WorkflowMeta;
     // toEqual on the WHOLE object — the union-stripping failure mode this repo guards against drops
     // fields silently, so assert every input field survives AND the schema defaults land exactly.
     expect(workflowManifestSchema.parse(full)).toEqual({

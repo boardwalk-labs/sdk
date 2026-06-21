@@ -4,6 +4,16 @@ Notable changes to `@boardwalk-labs/workflow` — the workflow authoring contrac
 the `meta` → manifest schema, the run-event wire format). Pre-1.0, additive changes ship as
 patch releases.
 
+## 0.1.15
+
+### Fixed
+
+- `budget.deadline_seconds` is now part of the `Budget` / `WorkflowMeta` TYPE. It shipped in 0.1.13
+  in the manifest schema (so the runtime accepted it) but was never added to the hand-written
+  interface, so `budget: { deadline_seconds: N } satisfies WorkflowMeta` failed `tsc` even though a
+  deployed run honored it. The contract guard only compared top-level keys, so the nested drift went
+  unnoticed; it now also asserts the nested `budget` key set matches the schema.
+
 ## 0.1.14
 
 ### Added

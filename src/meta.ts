@@ -184,7 +184,17 @@ export type Notification =
 export interface Budget {
   max_tokens?: number;
   max_usd?: number;
+  /**
+   * Active-compute seconds: only on-CPU execution counts. A run parked in a long `sleep`, a
+   * human-input gate, or a child-wait does not burn this. The runaway / cost cap.
+   */
   max_duration_seconds?: number;
+  /**
+   * Wall-clock seconds from the run's start, including suspended idle: the staleness / SLA cap.
+   * Orthogonal to `max_duration_seconds` (e.g. an approval that may legitimately wait hours but is
+   * pointless after a day pairs a small `max_duration_seconds` with a large `deadline_seconds`).
+   */
+  deadline_seconds?: number;
 }
 
 /**
