@@ -224,6 +224,7 @@ export type {
   CronTrigger,
   WebhookTrigger,
   ManualTrigger,
+  WorkflowRunTrigger,
   McpServerRef,
   Concurrency,
   CallableBy,

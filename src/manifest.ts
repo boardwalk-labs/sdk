@@ -71,10 +71,23 @@ const manualTriggerSchema = z.strictObject({
   kind: z.literal("manual"),
 });
 
+/** React to ANOTHER workflow's run finishing (GitHub-Actions `on: workflow_run`). When any of the
+ *  named upstream workflows (slugs in the same org) completes, this workflow runs with the run-event
+ *  payload as its input. `conclusions` optionally narrows to specific outcomes; omitted = any. */
+const workflowRunTriggerSchema = z.strictObject({
+  kind: z.literal("workflow_run"),
+  workflows: z.array(workflowSlug).min(1).max(20),
+  conclusions: z
+    .array(z.enum(["success", "failure", "cancelled"]))
+    .min(1)
+    .optional(),
+});
+
 const triggerSchema = z.discriminatedUnion("kind", [
   cronTriggerSchema,
   webhookTriggerSchema,
   manualTriggerSchema,
+  workflowRunTriggerSchema,
 ]);
 
 // ============================================================================

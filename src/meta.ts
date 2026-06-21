@@ -30,7 +30,17 @@ export interface ManualTrigger {
   kind: "manual";
 }
 
-export type Trigger = CronTrigger | WebhookTrigger | ManualTrigger;
+/** React to another workflow's run finishing (GitHub-Actions `on: workflow_run`). Server engines
+ *  only — `dev` has no upstream runs to react to. */
+export interface WorkflowRunTrigger {
+  kind: "workflow_run";
+  /** Upstream workflow slug(s) in this org whose completion fires this workflow. */
+  workflows: readonly string[];
+  /** Optional outcome filter; omitted = any terminal conclusion. */
+  conclusions?: readonly ("success" | "failure" | "cancelled")[];
+}
+
+export type Trigger = CronTrigger | WebhookTrigger | ManualTrigger | WorkflowRunTrigger;
 
 // ============================================================================
 // Agent capabilities

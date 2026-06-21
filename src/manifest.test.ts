@@ -125,9 +125,44 @@ describe("triggers", () => {
     expect(() => cron("9 * *")).toThrow(/5 fields/);
   });
 
-  it("rejects event triggers (not in v1)", () => {
+  it("rejects generic event triggers (only the specific workflow_run kind exists)", () => {
     expect(() =>
       validateMeta({ ...MINIMAL, triggers: [{ kind: "event", event_name: "x" }] }),
+    ).toThrow(MetaValidationError);
+  });
+
+  it("accepts a workflow_run trigger reacting to upstream workflows", () => {
+    const m = validateMeta({
+      ...MINIMAL,
+      triggers: [{ kind: "workflow_run", workflows: ["ci", "lint"] }],
+    });
+    expect(m.triggers[0]).toEqual({ kind: "workflow_run", workflows: ["ci", "lint"] });
+  });
+
+  it("accepts a workflow_run conclusions filter", () => {
+    const m = validateMeta({
+      ...MINIMAL,
+      triggers: [{ kind: "workflow_run", workflows: ["ci"], conclusions: ["success"] }],
+    });
+    expect(m.triggers[0]).toEqual({
+      kind: "workflow_run",
+      workflows: ["ci"],
+      conclusions: ["success"],
+    });
+  });
+
+  it("rejects a workflow_run with no upstream workflows, a bad conclusion, or an invalid slug", () => {
+    expect(() =>
+      validateMeta({ ...MINIMAL, triggers: [{ kind: "workflow_run", workflows: [] }] }),
+    ).toThrow(MetaValidationError);
+    expect(() =>
+      validateMeta({
+        ...MINIMAL,
+        triggers: [{ kind: "workflow_run", workflows: ["ci"], conclusions: ["merged"] }],
+      }),
+    ).toThrow(MetaValidationError);
+    expect(() =>
+      validateMeta({ ...MINIMAL, triggers: [{ kind: "workflow_run", workflows: ["has space"] }] }),
     ).toThrow(MetaValidationError);
   });
 });
