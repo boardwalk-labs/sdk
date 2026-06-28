@@ -14,7 +14,7 @@ export {
   resetRuntime,
   requireHost,
 } from "./host.js";
-export type { WorkflowHost } from "./host.js";
+export type { WorkflowHost, RuntimeContext } from "./host.js";
 export type {
   AgentOptions,
   ToolDef,

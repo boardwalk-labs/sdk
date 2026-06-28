@@ -97,7 +97,6 @@ const triggerSchema = z.discriminatedUnion("kind", [
 /** A secret ref is exactly `{ name }` — secrets + env vars are the entire credential story. */
 const secretRefSchema = z.strictObject({ name: shortName });
 
-const RESERVED_ENV_PREFIX_RE = /^(boardwalk_|aws_)/i;
 /** The ONLY supported interpolation: a whole-value `${{ secrets.NAME }}` reference. */
 const WHOLE_VALUE_SECRET_RE = /^\$\{\{\s*secrets\.[A-Za-z0-9_-]+\s*\}\}$/;
 
@@ -109,13 +108,9 @@ const envVarsSchema = z
       ctx.addIssue({ code: "custom", message: "at most 100 env vars are allowed" });
     }
     for (const key of keys) {
-      if (RESERVED_ENV_PREFIX_RE.test(key)) {
-        ctx.addIssue({
-          code: "custom",
-          path: [key],
-          message: `"${key}" uses a reserved prefix (BOARDWALK_* / AWS_*)`,
-        });
-      }
+      // The program owns `process.env` outright: there are no reserved key prefixes. Platform
+      // context + credentials reach the run out of band (never as env), so a user var named
+      // `BOARDWALK_*` / `AWS_*` can't shadow anything. See docs/RUN_ENV_AND_CREDS.md.
       const value = vars[key];
       if (value !== undefined && value.includes("${{") && !WHOLE_VALUE_SECRET_RE.test(value)) {
         ctx.addIssue({

@@ -4,6 +4,23 @@ Notable changes to `@boardwalk-labs/workflow` — the workflow authoring contrac
 the `meta` → manifest schema, the run-event wire format). Pre-1.0, additive changes ship as
 patch releases.
 
+## 0.1.16
+
+### Added
+
+- `runtime` — the run's identity + on-demand platform credential, imported as
+  `import { runtime } from "@boardwalk-labs/workflow"`. Synchronous `runtime.runId` /
+  `runtime.workflowId` / `runtime.orgId` / `runtime.apiUrl`, plus `await runtime.apiToken()` for a
+  short-lived, manifest-scoped bearer to call the public API / MCP / CLI. Platform credentials are
+  no longer placed in `process.env`, so `apiToken()` is the supported way to reach the bearer; it is
+  redacted from all LLM context. Backed by the new optional `WorkflowHost.runtime` host seam.
+
+### Changed
+
+- **Env var names are unrestricted.** The `meta.env` validator no longer rejects the `BOARDWALK_*` /
+  `AWS_*` prefixes — the program owns `process.env` outright. Platform context + credentials reach a
+  run out of band (never as env), so a user var can't shadow anything. See docs/RUN_ENV_AND_CREDS.md.
+
 ## 0.1.15
 
 ### Fixed

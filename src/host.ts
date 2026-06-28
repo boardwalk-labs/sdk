@@ -25,8 +25,36 @@ import type {
   SleepArg,
 } from "./types.js";
 
+/**
+ * The run's identity + on-demand platform credential, exposed to the program as
+ * `import { runtime } from "@boardwalk-labs/workflow"`. The engine supplies it; platform
+ * credentials are NEVER placed in `process.env` (where the agent's tools / subprocesses could
+ * read them), so trusted program code reaches the public-API bearer ONLY through `apiToken()`.
+ */
+export interface RuntimeContext {
+  /** This run's id. */
+  runId: string;
+  /** The workflow this run belongs to. */
+  workflowId: string;
+  /** The owning org. A run-scoped `apiToken()` already binds this org, so callers rarely need it. */
+  orgId: string;
+  /** Public API base origin (e.g. `https://api.boardwalk.sh`); append `/v1` or `/mcp/v1` as needed. */
+  apiUrl: string;
+  /**
+   * A short-lived bearer scoped to this run's manifest permissions, for raw public-API / MCP / CLI
+   * use. Fetched on demand (never ambient): pass it into an MCP `headers` block or a subprocess env
+   * explicitly. It is redacted from all LLM context, so the agent leaf never sees it.
+   */
+  apiToken(): Promise<string>;
+}
+
 /** The engine contract a host supplies. The author-facing hooks delegate to this. */
 export interface WorkflowHost {
+  /**
+   * The run's identity + on-demand public-API token (see {@link RuntimeContext}). Optional — an
+   * engine that doesn't supply it makes the `runtime.*` accessors throw a clear error.
+   */
+  runtime?: RuntimeContext;
   /**
    * Mark the current run phase. Everything after this marker belongs to the phase until the next
    * marker or run end. Observability-only: this is not a checkpoint/resume boundary.

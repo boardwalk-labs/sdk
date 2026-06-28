@@ -196,9 +196,11 @@ describe("secrets and env", () => {
     expect(m.permissions?.secrets).toEqual([{ name: "GITHUB_TOKEN" }]);
   });
 
-  it("rejects reserved env prefixes", () => {
-    expect(() => validateMeta({ ...MINIMAL, env: { BOARDWALK_X: "1" } })).toThrow(/reserved/);
-    expect(() => validateMeta({ ...MINIMAL, env: { aws_region: "1" } })).toThrow(/reserved/);
+  it("allows any env var name — no reserved prefixes (the program owns process.env)", () => {
+    expect(validateMeta({ ...MINIMAL, env: { BOARDWALK_X: "1" } }).env).toEqual({ BOARDWALK_X: "1" });
+    expect(validateMeta({ ...MINIMAL, env: { AWS_REGION: "us-east-1" } }).env).toEqual({
+      AWS_REGION: "us-east-1",
+    });
   });
 
   it("allows whole-value secret references only", () => {

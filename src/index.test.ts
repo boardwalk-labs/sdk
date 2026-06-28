@@ -8,6 +8,7 @@ import {
   output,
   parallel,
   phase,
+  runtime,
   secrets,
   sleep,
   step,
@@ -145,6 +146,35 @@ describe("sleep / secrets / phase / artifacts", () => {
       name: "a.txt",
       url: "file:///a.txt",
     });
+  });
+});
+
+describe("runtime", () => {
+  it("throws a clear error when the engine supplies no runtime context", async () => {
+    installHost(makeHost());
+    expect(() => runtime.runId).toThrow(/runtime context is not available/);
+    await expect(runtime.apiToken()).rejects.toThrow(/runtime context is not available/);
+  });
+
+  it("exposes ids synchronously and resolves apiToken through the host", async () => {
+    const apiToken = vi.fn().mockResolvedValue("run-api-token");
+    installHost(
+      makeHost({
+        runtime: {
+          runId: "run_1",
+          workflowId: "wf_1",
+          orgId: "org_1",
+          apiUrl: "https://api.boardwalk.sh",
+          apiToken,
+        },
+      }),
+    );
+    expect(runtime.runId).toBe("run_1");
+    expect(runtime.workflowId).toBe("wf_1");
+    expect(runtime.orgId).toBe("org_1");
+    expect(runtime.apiUrl).toBe("https://api.boardwalk.sh");
+    await expect(runtime.apiToken()).resolves.toBe("run-api-token");
+    expect(apiToken).toHaveBeenCalledTimes(1);
   });
 });
 

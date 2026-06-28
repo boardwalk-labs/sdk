@@ -14,6 +14,7 @@
 // install a host — the engine running the program does.
 
 import { requireHost, recordOutput } from "./host.js";
+import type { RuntimeContext } from "./host.js";
 import type {
   AgentOptions,
   ArtifactBody,
@@ -172,6 +173,48 @@ export const secrets = {
   /** Resolve a granted secret to its plaintext value. */
   async get(name: string): Promise<string> {
     return await requireHost().getSecret(name);
+  },
+} as const;
+
+/** The installed host's runtime context, or a clear error when the engine doesn't supply one. */
+function requireRuntime(): RuntimeContext {
+  const ctx = requireHost().runtime;
+  if (ctx === undefined) {
+    throw new Error("runtime context is not available in the installed engine");
+  }
+  return ctx;
+}
+
+/**
+ * This run's identity + on-demand platform credential. The ids are synchronous; `apiToken()` fetches
+ * a short-lived, manifest-scoped bearer for raw public-API / MCP / CLI use. Platform credentials are
+ * never placed in `process.env`, so this is the only way trusted program code obtains the bearer —
+ * and it is redacted from all LLM context, so the agent leaf never sees it.
+ *
+ *   const token = await runtime.apiToken();
+ *   const mcp = [{ name: "boardwalk", transport: "http", url: `${runtime.apiUrl}/mcp/v1`,
+ *                  headers: { Authorization: `Bearer ${token}` } }];
+ */
+export const runtime = {
+  /** This run's id. */
+  get runId(): string {
+    return requireRuntime().runId;
+  },
+  /** The workflow this run belongs to. */
+  get workflowId(): string {
+    return requireRuntime().workflowId;
+  },
+  /** The owning org (a run-scoped `apiToken()` already binds it, so callers rarely need this). */
+  get orgId(): string {
+    return requireRuntime().orgId;
+  },
+  /** Public API base origin (e.g. `https://api.boardwalk.sh`); append `/v1` or `/mcp/v1` as needed. */
+  get apiUrl(): string {
+    return requireRuntime().apiUrl;
+  },
+  /** Fetch a short-lived, manifest-scoped bearer for the public API / MCP / CLI. */
+  async apiToken(): Promise<string> {
+    return await requireRuntime().apiToken();
   },
 } as const;
 
