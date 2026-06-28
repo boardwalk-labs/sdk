@@ -197,7 +197,9 @@ describe("secrets and env", () => {
   });
 
   it("allows any env var name — no reserved prefixes (the program owns process.env)", () => {
-    expect(validateMeta({ ...MINIMAL, env: { BOARDWALK_X: "1" } }).env).toEqual({ BOARDWALK_X: "1" });
+    expect(validateMeta({ ...MINIMAL, env: { BOARDWALK_X: "1" } }).env).toEqual({
+      BOARDWALK_X: "1",
+    });
     expect(validateMeta({ ...MINIMAL, env: { AWS_REGION: "us-east-1" } }).env).toEqual({
       AWS_REGION: "us-east-1",
     });
