@@ -4,11 +4,13 @@
 //
 // Boardwalk runs are restart-from-the-top on crash (hold-and-pay) and replay-from-the-top on
 // resume (durable suspension). Either way, any code OUTSIDE a journaled seam re-executes — so a
-// bare nondeterministic call (Date.now / Math.random / new Date() / fetch / performance.now) can
-// silently produce a DIFFERENT value the second time, corrupting the run's logic. The fix is to
-// route nondeterministic work through `step.run(name, fn)` (its result is memoized) or `agent()`
-// (a journaled seam). This lint flags such calls anywhere in the program — determinism matters
-// everywhere, not just on a path to a suspend — and is ADVISORY (warnings, it never blocks).
+// bare nondeterministic call (Date.now / new Date() / Math.random / crypto.randomUUID / fetch / …)
+// can silently produce a DIFFERENT value the second time, corrupting the run's logic. The fix is
+// the durable primitives `now()` / `random()` / `uuid()` (each memoizes its value through a step),
+// or for arbitrary I/O `step.run(name, fn)` / `agent()` (journaled seams). This lint flags such
+// calls anywhere in the program — determinism matters everywhere, not just on a path to a suspend.
+// It returns warnings; whether they BLOCK is the caller's policy (the CLI fails `deploy` on them
+// unless `--allow-nondeterminism` is passed).
 //
 // Pure AST analysis via the TypeScript compiler API; it executes none of the program. A subpath
 // export (`@boardwalk-labs/workflow/lint`) shared by the CLI, the engines, and the hosted deploy
@@ -33,7 +35,41 @@ export interface LintOptions {
 
 const DEFAULT_FILE_NAME = "index.ts";
 
-const FIX = "wrap it in step.run(name, fn) (its result is memoized) or move it behind agent()";
+const STEP_FIX = "wrap it in step.run(name, fn) (its result is memoized) or move it behind agent()";
+
+/**
+ * Call expressions (by callee name) + `new X()` forms whose value is nondeterministic — they read the
+ * clock, randomness, or the network, so a replay produces a different value. Property-access callees
+ * appear dotted ("Date.now"); bare-identifier callees appear plain ("fetch"). `new Date()` is handled
+ * separately ({@link isBareNewDate}) since only the zero-arg form is a clock read.
+ */
+const NONDETERMINISTIC = new Set([
+  "Date.now",
+  "Math.random",
+  "performance.now",
+  "crypto.randomUUID",
+  "crypto.getRandomValues",
+  "fetch",
+  "randomUUID", // `import { randomUUID } from "node:crypto"` called bare
+]);
+
+/** The most ergonomic durable replacement for a flagged symbol — the durable primitive when one fits,
+ *  else the general step/agent escape hatch. */
+function fixFor(symbol: string): string {
+  switch (symbol) {
+    case "Date.now":
+    case "new Date()":
+    case "performance.now":
+      return `use now() (durable epoch ms — \`new Date(await now())\` for a Date), or ${STEP_FIX}`;
+    case "Math.random":
+      return `use random() (durable float in [0,1)), or ${STEP_FIX}`;
+    case "crypto.randomUUID":
+    case "randomUUID":
+      return `use uuid() (durable v4 id), or ${STEP_FIX}`;
+    default:
+      return STEP_FIX;
+  }
+}
 
 /**
  * Flag bare nondeterministic calls that sit OUTSIDE a journaled seam (`step.run` / `agent`), where
@@ -56,7 +92,7 @@ export function lintDeterminism(source: string, options: LintOptions = {}): Dete
       symbol,
       line: line + 1,
       column: character + 1,
-      message: `${symbol} is nondeterministic and re-runs on a restart/resume — ${FIX}.`,
+      message: `${symbol} is nondeterministic and re-runs on a restart/resume — ${fixFor(symbol)}.`,
     });
   };
 
@@ -66,10 +102,8 @@ export function lintDeterminism(source: string, options: LintOptions = {}): Dete
 
     if (ts.isCallExpression(node)) {
       const name = calleeName(node.expression);
-      if (name === "Date.now" || name === "Math.random" || name === "performance.now") {
+      if (name !== null && NONDETERMINISTIC.has(name)) {
         flag(node, name);
-      } else if (name === "fetch") {
-        flag(node, "fetch");
       }
     } else if (ts.isNewExpression(node) && isBareNewDate(node)) {
       flag(node, "new Date()");
@@ -82,11 +116,12 @@ export function lintDeterminism(source: string, options: LintOptions = {}): Dete
   return warnings;
 }
 
-/** "Date.now" / "Math.random" / "fetch" / "performance.now"; null for anything else. */
+/** A bare identifier ("fetch", "randomUUID") or a single-level property access ("Date.now",
+ *  "crypto.randomUUID"); null for anything deeper (e.g. `globalThis.crypto.randomUUID`). */
 function calleeName(expr: ts.Expression): string | null {
-  if (ts.isIdentifier(expr)) return expr.text; // fetch(...)
+  if (ts.isIdentifier(expr)) return expr.text; // fetch(...), randomUUID(...)
   if (ts.isPropertyAccessExpression(expr) && ts.isIdentifier(expr.expression)) {
-    return `${expr.expression.text}.${expr.name.text}`; // Date.now, Math.random, performance.now
+    return `${expr.expression.text}.${expr.name.text}`; // Date.now, crypto.randomUUID, …
   }
   return null;
 }

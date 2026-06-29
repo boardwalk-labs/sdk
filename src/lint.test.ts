@@ -27,6 +27,39 @@ describe("lintDeterminism", () => {
     expect(symbols).toEqual(["Date.now", "Math.random", "fetch", "new Date()", "performance.now"]);
   });
 
+  it("flags crypto randomness: crypto.randomUUID / crypto.getRandomValues / bare randomUUID", () => {
+    const src = `
+      import { randomUUID } from "node:crypto";
+      const a = crypto.randomUUID();
+      const b = crypto.getRandomValues(new Uint8Array(16));
+      const c = randomUUID();
+    `;
+    const symbols = lintDeterminism(src)
+      .map((w) => w.symbol)
+      .sort();
+    expect(symbols).toEqual(["crypto.getRandomValues", "crypto.randomUUID", "randomUUID"]);
+  });
+
+  it("points each clock/random/uuid symbol at its durable primitive", () => {
+    const byMessage = (sym: string): string => {
+      const w = lintDeterminism(`const x = ${sym};`);
+      return w[0]?.message ?? "";
+    };
+    expect(byMessage("Date.now()")).toContain("use now()");
+    expect(byMessage("Math.random()")).toContain("use random()");
+    expect(byMessage("crypto.randomUUID()")).toContain("use uuid()");
+    // A non-substitutable source falls back to the step.run / agent escape hatch.
+    expect(byMessage('fetch("x")')).toContain("step.run");
+  });
+
+  it("does NOT flag the durable primitives themselves (now / random / uuid)", () => {
+    const src = `
+      import { now, random, uuid, output } from "@boardwalk-labs/workflow";
+      output({ t: await now(), r: await random(), id: await uuid() });
+    `;
+    expect(lintDeterminism(src)).toEqual([]);
+  });
+
   it("does NOT flag nondeterminism inside step.run (its result is memoized)", () => {
     const src = `
       import { step, output } from "@boardwalk-labs/workflow";

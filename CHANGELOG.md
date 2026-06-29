@@ -4,6 +4,28 @@ Notable changes to `@boardwalk-labs/workflow` — the workflow authoring contrac
 the `meta` → manifest schema, the run-event wire format). Pre-1.0, additive changes ship as
 patch releases.
 
+## 0.1.17
+
+### Added
+
+- **Durable clock + randomness: `now()` / `random()` / `uuid()`.** A workflow program replays from the
+  top on a resume (durable suspension) and a crash, so a bare `Date.now()` / `new Date()` /
+  `Math.random()` / `crypto.randomUUID()` re-runs and yields a _different_ value each segment —
+  silently corrupting any value captured before a `sleep`/`humanInput` and read after it. These
+  capture the value once through the durable `step` seam and memoize it, so it survives a
+  suspend/resume and a crash-restart unchanged. `now()` is epoch ms (`new Date(await now())` for a
+  Date); `random()` is a float in [0, 1); `uuid()` is a v4 id. Each is one journaled step (a broker
+  round-trip), so capture a value once rather than calling in a hot loop.
+
+### Changed
+
+- **Determinism lint (`@boardwalk-labs/workflow/lint`) now covers crypto randomness and points at the
+  primitives.** Added `crypto.randomUUID` / `crypto.getRandomValues` / bare `randomUUID` to the
+  flagged set, and each clock/random/uuid warning now names its durable replacement (`now()` /
+  `random()` / `uuid()`) instead of only `step.run`. The lint itself stays a pure function returning
+  warnings; enforcement is the caller's policy (the CLI fails `deploy` on warnings unless
+  `--allow-nondeterminism` is passed).
+
 ## 0.1.16
 
 ### Added
