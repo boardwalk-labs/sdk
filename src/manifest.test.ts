@@ -268,3 +268,23 @@ describe("platform-extension fields", () => {
     ).toThrow(MetaValidationError);
   });
 });
+
+describe("runs_on self-hosted pool default", () => {
+  it("fills pool with 'default' when omitted (the pool `boardwalk runner start` creates)", () => {
+    const parsed = workflowManifestSchema.parse({
+      slug: "on-my-metal",
+      triggers: [{ kind: "manual" }],
+      runs_on: { kind: "self-hosted" },
+    });
+    expect(parsed.runs_on).toEqual({ kind: "self-hosted", pool: "default" });
+  });
+
+  it("keeps an explicit pool + labels", () => {
+    const parsed = workflowManifestSchema.parse({
+      slug: "on-my-metal",
+      triggers: [{ kind: "manual" }],
+      runs_on: { kind: "self-hosted", pool: "gpu-fleet", labels: ["gpu"] },
+    });
+    expect(parsed.runs_on).toEqual({ kind: "self-hosted", pool: "gpu-fleet", labels: ["gpu"] });
+  });
+});

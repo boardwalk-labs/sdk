@@ -182,7 +182,8 @@ const hostedRunsOnLabel = z.enum([
 const runsOnSchema = z.union([
   z.strictObject({
     kind: z.literal("self-hosted"),
-    pool: z.string().min(1).max(120),
+    /** Pool name; omitted ⇒ `"default"` — the pool `boardwalk runner start` creates. */
+    pool: z.string().min(1).max(120).default("default"),
     labels: z.array(z.string().min(1).max(120)).optional(),
   }),
   z.strictObject({

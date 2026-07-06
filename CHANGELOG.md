@@ -4,6 +4,14 @@ Notable changes to `@boardwalk-labs/workflow` — the workflow authoring contrac
 the `meta` → manifest schema, the run-event wire format). Pre-1.0, additive changes ship as
 patch releases.
 
+## 0.1.18
+
+### Changed
+
+- **`runs_on: { kind: "self-hosted" }` defaults `pool` to `"default"`.** The pool
+  `boardwalk runner start` creates; naming it explicitly is now optional. Parsed manifests
+  always carry a concrete `pool`.
+
 ## 0.1.17
 
 ### Added

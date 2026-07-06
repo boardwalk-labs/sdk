@@ -100,7 +100,8 @@ export interface HostedRunsOnObject {
 
 export interface SelfHostedRunsOn {
   kind: "self-hosted";
-  pool: string;
+  /** Pool name; omitted ⇒ `"default"` — the pool `boardwalk runner start` creates. */
+  pool?: string;
   labels?: readonly string[];
 }
 
