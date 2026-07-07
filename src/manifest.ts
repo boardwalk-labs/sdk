@@ -110,7 +110,7 @@ const envVarsSchema = z
     for (const key of keys) {
       // The program owns `process.env` outright: there are no reserved key prefixes. Platform
       // context + credentials reach the run out of band (never as env), so a user var named
-      // `BOARDWALK_*` / `AWS_*` can't shadow anything. See docs/RUN_ENV_AND_CREDS.md.
+      // `BOARDWALK_*` / `AWS_*` can't shadow anything.
       const value = vars[key];
       if (value !== undefined && value.includes("${{") && !WHOLE_VALUE_SECRET_RE.test(value)) {
         ctx.addIssue({

@@ -49,7 +49,7 @@ patch releases.
 
 - **Env var names are unrestricted.** The `meta.env` validator no longer rejects the `BOARDWALK_*` /
   `AWS_*` prefixes — the program owns `process.env` outright. Platform context + credentials reach a
-  run out of band (never as env), so a user var can't shadow anything. See docs/RUN_ENV_AND_CREDS.md.
+  run out of band (never as env), so a user var can't shadow anything.
 
 ## 0.1.15
 

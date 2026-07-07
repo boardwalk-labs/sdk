@@ -9,7 +9,7 @@ import {
 } from "./manifest.js";
 import type { WorkflowMeta } from "./meta.js";
 
-// Compile-time contract guard (CODE_QUALITY §7.3 / SPEC §2.3): the author-facing `WorkflowMeta`
+// Compile-time contract guard (the contract guard): the author-facing `WorkflowMeta`
 // (meta.ts) is hand-written for readable JSDoc, NOT derived from the schema, so the two can drift.
 // A `toEqualTypeOf` is impossible (the meta type uses `readonly` arrays; the schema yields mutable
 // ones), but their FIELD SET must stay identical — a field added to one and not the other is the
