@@ -170,6 +170,77 @@ export interface AgentOptions {
    * guard). Per-agent. Non-integer or `< 1` values are ignored (treated as no cap).
    */
   maxIterations?: number;
+  /**
+   * A computer-use {@link BrowserSession} (from {@link import("./index.js").computer}.openBrowser)
+   * this leaf may drive. When set, the leaf gains that session's tool surface — for a browser
+   * session, in-VM Playwright MCP attached to the session; the program still owns the session and
+   * may drive/inspect it in plain code between leaves. Per-agent. Defaults to none. Requires an
+   * engine with computer-use support (otherwise the session couldn't have been opened).
+   */
+  session?: BrowserSession;
+}
+
+/**
+ * A live, in-VM browser session the PROGRAM owns — opened with
+ * {@link import("./index.js").computer}.openBrowser, handed to a leaf via {@link AgentOptions.session},
+ * and/or driven directly in trusted program code. Survives suspend/resume (the browser lives inside the
+ * run's snapshot). The handle is thin (an opaque {@link BrowserSession.id} + methods that round-trip to
+ * the guest); it holds no browser state itself.
+ */
+export interface BrowserSession {
+  /** Opaque session id, stable for the session's lifetime. */
+  readonly id: string;
+  /** Navigate the session's page to `url` (waits for load). */
+  navigate(url: string): Promise<void>;
+  /** The current page URL. */
+  url(): Promise<string>;
+  /** The current page title. */
+  title(): Promise<string>;
+  /** Capture the viewport; stored as an artifact, its {@link ArtifactRef} returned. */
+  screenshot(opts?: { fullPage?: boolean }): Promise<ArtifactRef>;
+  /** Recent browser console entries (newest last). `since` filters by epoch-ms. */
+  console(opts?: { since?: number }): Promise<readonly ConsoleEntry[]>;
+  /** Recent network requests (newest last). `since` filters by epoch-ms. */
+  network(opts?: { since?: number }): Promise<readonly NetworkEntry[]>;
+  /**
+   * Evaluate JS in the page context and resolve to the result. **Program-only** — deliberately not
+   * an agent tool (arbitrary page-eval is the injection jackpot); the trusted layer holds this.
+   */
+  eval<T = unknown>(expression: string): Promise<T>;
+  /** Close the session (tears down the browser). Idempotent; a session left open is reaped at run end. */
+  close(): Promise<void>;
+}
+
+/** Options for {@link import("./index.js").computer}.openBrowser. */
+export interface BrowserSessionOptions {
+  /** Navigate here on open; omit for `about:blank`. */
+  startUrl?: string;
+  /** Viewport size; defaults to the ambient desktop resolution. */
+  viewport?: { width: number; height: number };
+  /**
+   * Grounding strategy for agent leaves bound to this session (see the computer-use design). Default
+   * `"auto"` → accessibility-tree refs for a browser (no vision); `"none"` uses raw coordinates (for
+   * models that ground natively); `"vision"` uses a detector; `"a11y"` forces the a11y-ref surface.
+   */
+  grounding?: "auto" | "a11y" | "vision" | "none";
+}
+
+/** A browser console entry, from {@link BrowserSession.console}. */
+export interface ConsoleEntry {
+  level: "log" | "info" | "warn" | "error" | "debug";
+  text: string;
+  /** Epoch milliseconds. */
+  timestamp: number;
+}
+
+/** A network request record, from {@link BrowserSession.network}. */
+export interface NetworkEntry {
+  method: string;
+  url: string;
+  /** Response status, once known. */
+  status?: number;
+  /** Epoch milliseconds the request started. */
+  timestamp: number;
 }
 
 /** Options for a {@link import("./index.js").workflows}.call durable child run. */

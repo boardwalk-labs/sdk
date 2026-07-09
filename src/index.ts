@@ -20,6 +20,8 @@ import type {
   AgentOptions,
   ArtifactBody,
   ArtifactRef,
+  BrowserSession,
+  BrowserSessionOptions,
   CallOptions,
   HumanChoiceResult,
   HumanInputChoiceSpec,
@@ -247,6 +249,24 @@ export const runtime = {
   },
 } as const;
 
+/** Computer use — open in-VM browser/desktop sessions the program owns and hands to agent leaves. */
+export const computer = {
+  /**
+   * Open a live, in-VM browser session (the browser tier of computer use). Returns a
+   * {@link BrowserSession} handle the PROGRAM owns: pass it to `agent(prompt, { session })` to give a
+   * leaf the browser tools (in-VM Playwright MCP attached to this session), and/or drive/inspect it in
+   * plain code (`await s.url()`, `await s.eval(...)`). The session survives suspend/resume. Requires an
+   * engine with a browser backend.
+   */
+  async openBrowser(opts?: BrowserSessionOptions): Promise<BrowserSession> {
+    const host = requireHost();
+    if (host.openBrowserSession === undefined) {
+      throw new Error("computer.openBrowser is not supported by the installed engine");
+    }
+    return await host.openBrowserSession(opts);
+  },
+} as const;
+
 /** Files (artifacts) that persist with the run. */
 export const artifacts = {
   /**
@@ -324,6 +344,10 @@ export type {
   ToolDef,
   ArtifactBody,
   ArtifactRef,
+  BrowserSession,
+  BrowserSessionOptions,
+  ConsoleEntry,
+  NetworkEntry,
   CallOptions,
   ScheduleOptions,
   PhaseOptions,

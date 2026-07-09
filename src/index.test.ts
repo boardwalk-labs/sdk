@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   agent,
   artifacts,
+  computer,
   humanInput,
   now,
   output,
@@ -17,6 +18,7 @@ import {
   uuid,
   workflows,
 } from "./index.js";
+import type { BrowserSession } from "./index.js";
 import {
   installConfig,
   installHost,
@@ -149,6 +151,32 @@ describe("sleep / secrets / phase / artifacts", () => {
       name: "a.txt",
       url: "file:///a.txt",
     });
+  });
+});
+
+describe("computer.openBrowser", () => {
+  it("throws when unsupported and delegates (forwarding opts) when supported", async () => {
+    installHost(makeHost());
+    await expect(computer.openBrowser()).rejects.toThrow(/not supported/);
+
+    const session = { id: "sess_1" } as unknown as BrowserSession;
+    const openBrowserSession = vi.fn().mockResolvedValue(session);
+    installHost(makeHost({ openBrowserSession }));
+
+    await expect(computer.openBrowser({ startUrl: "https://example.com" })).resolves.toBe(session);
+    expect(openBrowserSession).toHaveBeenCalledWith({ startUrl: "https://example.com" });
+  });
+
+  it("passes a returned session through agent({ session })", async () => {
+    const session = { id: "sess_2" } as unknown as BrowserSession;
+    const agentFn = vi.fn().mockResolvedValue("done");
+    installHost(
+      makeHost({ agent: agentFn, openBrowserSession: vi.fn().mockResolvedValue(session) }),
+    );
+
+    const s = await computer.openBrowser();
+    await agent("drive it", { session: s });
+    expect(agentFn).toHaveBeenCalledWith("drive it", { session });
   });
 });
 

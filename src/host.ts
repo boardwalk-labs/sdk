@@ -16,6 +16,8 @@ import type {
   AgentOptions,
   ArtifactBody,
   ArtifactRef,
+  BrowserSession,
+  BrowserSessionOptions,
   CallOptions,
   HumanInputOptions,
   HumanInputResult,
@@ -110,6 +112,12 @@ export interface WorkflowHost {
    * clear error.
    */
   step?(name: string, fn: () => unknown): Promise<unknown>;
+  /**
+   * Open a live, in-VM browser session the program owns (the browser tier of computer use). Resolves
+   * to a {@link BrowserSession} handle. Optional — an engine without a desktop/browser backend makes
+   * the `computer.openBrowser` hook throw a clear error.
+   */
+  openBrowserSession?(opts: BrowserSessionOptions | undefined): Promise<BrowserSession>;
 }
 
 let currentHost: WorkflowHost | null = null;
