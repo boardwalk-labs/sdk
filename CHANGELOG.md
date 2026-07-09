@@ -4,6 +4,17 @@ Notable changes to `@boardwalk-labs/workflow` — the workflow authoring contrac
 the `meta` → manifest schema, the run-event wire format). Pre-1.0, additive changes ship as
 patch releases.
 
+## 0.1.21
+
+### Added
+
+- **`AgentOptions.maxIterations`** — an optional per-`agent()` ceiling on tool-calling turns. Omit
+  (the default) for no cap: the leaf runs until the model stops calling tools, bounded by the run
+  budget, the repetition guard, and cancellation. A positive integer caps the leaf as a **soft**
+  landing — the turn past the ceiling withholds tools so the model must give a final answer rather
+  than the run failing. Non-integer / `< 1` values are ignored. (Consumed by `@boardwalk-labs/engine`
+  once its dep is bumped to this build.)
+
 ## 0.1.18
 
 ### Changed
