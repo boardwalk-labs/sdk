@@ -60,6 +60,9 @@ const cronTriggerSchema = z.strictObject({
   kind: z.literal("cron"),
   expr: cronExpr,
   timezone: z.string().min(1).max(80).optional(),
+  // Static input for each scheduled run (must satisfy the workflow's input_schema when declared).
+  // Omitted ⇒ the run fires with no input. A JSON object, mirroring input_schema's `type: object`.
+  input: jsonSchemaObject.optional(),
 });
 
 const webhookTriggerSchema = z.strictObject({

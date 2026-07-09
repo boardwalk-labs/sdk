@@ -18,6 +18,12 @@ export interface CronTrigger {
   expr: string;
   /** IANA timezone (e.g. `America/Anchorage`). Defaults to UTC. */
   timezone?: string;
+  /**
+   * Static input passed to each scheduled run (the value `import { input }` resolves to). Must match
+   * the workflow's `input_schema` when one is declared. Omitted ⇒ the run fires with no input. For a
+   * runtime-computed input or cadence, use the `workflows.schedule` primitive instead.
+   */
+  input?: Record<string, unknown>;
 }
 
 /** Server engines only (the self-hosted server and the hosted Boardwalk platform) — `dev` has no listener. */

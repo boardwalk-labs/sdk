@@ -142,6 +142,24 @@ describe("triggers", () => {
     ).toThrow(MetaValidationError);
   });
 
+  it("carries a cron trigger's static input through validation", () => {
+    const m = validateMeta({
+      ...MINIMAL,
+      triggers: [{ kind: "cron", expr: "0 9 * * *", input: { mode: "full", limit: 10 } }],
+    });
+    expect(m.triggers[0]).toEqual({
+      kind: "cron",
+      expr: "0 9 * * *",
+      input: { mode: "full", limit: 10 },
+    });
+  });
+
+  it("rejects a non-object cron input", () => {
+    expect(() =>
+      validateMeta({ ...MINIMAL, triggers: [{ kind: "cron", expr: "0 9 * * *", input: "full" }] }),
+    ).toThrow(MetaValidationError);
+  });
+
   it("accepts a workflow_run trigger reacting to upstream workflows", () => {
     const m = validateMeta({
       ...MINIMAL,
