@@ -226,9 +226,8 @@ const egressSchema = z.union([
   z.strictObject({
     level: z.literal("custom"),
     allow: z.array(z.string().min(1).max(256)).min(1),
-    include_defaults: z.boolean().optional(),
   }),
-  z.strictObject({ level: z.enum(["none", "trusted", "full"]) }),
+  z.strictObject({ level: z.enum(["none", "full"]) }),
 ]);
 
 const notificationSchema = z.union([

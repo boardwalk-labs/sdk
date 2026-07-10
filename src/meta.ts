@@ -152,9 +152,8 @@ export type EnvVars = Record<string, string>;
 
 export type EgressPolicy =
   | { level: "none" }
-  | { level: "trusted" }
   | { level: "full" }
-  | { level: "custom"; allow: readonly string[]; include_defaults?: boolean };
+  | { level: "custom"; allow: readonly string[] };
 
 export type RunPermissionAccess = "none" | "read" | "write";
 

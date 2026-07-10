@@ -256,7 +256,7 @@ describe("platform-extension fields", () => {
   it("validates egress, callable_by, notifications round-trip with toEqual", () => {
     const m = validateMeta({
       ...MINIMAL,
-      egress: { level: "custom", allow: ["api.github.com"], include_defaults: true },
+      egress: { level: "custom", allow: ["api.github.com"] },
       callable_by: { roles: ["admin", "member"] },
       notifications: [
         { on: "failure", channel: "email", target: "ops@example.com" },
@@ -266,7 +266,6 @@ describe("platform-extension fields", () => {
     expect(m.egress).toEqual({
       level: "custom",
       allow: ["api.github.com"],
-      include_defaults: true,
     });
     expect(m.callable_by).toEqual({ roles: ["admin", "member"] });
     expect(m.notifications).toEqual([
