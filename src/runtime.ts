@@ -18,6 +18,7 @@ export type { WorkflowHost, RuntimeContext } from "./host.js";
 export type { McpServerRef } from "./meta.js";
 export type {
   AgentOptions,
+  AgentAttachment,
   ToolDef,
   ArtifactBody,
   ArtifactRef,

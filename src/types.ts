@@ -178,6 +178,33 @@ export interface AgentOptions {
    * engine with computer-use support (otherwise the session couldn't have been opened).
    */
   session?: BrowserSession;
+  /**
+   * Files to prepend to this leaf's first user message so the model can SEE them — images
+   * (`image/*`) and documents (PDFs, …). Each is an {@link AgentAttachment} carrying a `mimeType`
+   * plus either inline base64 (`data`) or a `url` (a `data:` URI or a remote `https:` URL the
+   * provider fetches). The model must support the matching input modality (vision/document); the
+   * managed catalog routes/refuses an incapable model. Text/source files should be passed as text
+   * in the prompt (or read with the `read` tool), not as attachments. Per-agent. Defaults to none.
+   */
+  attachments?: readonly AgentAttachment[];
+}
+
+/**
+ * A file handed to an {@link AgentOptions.attachments} — an image or a document the model reads
+ * directly. Provide the bytes ONE of two ways (exactly one of `data`/`url`):
+ *  - `data`: inline base64 — provider-portable, the default for locally-produced bytes.
+ *  - `url`: a `data:` URI or a remote `https:` URL. Remote URLs keep the payload small but aren't
+ *    accepted by every provider/modality.
+ */
+export interface AgentAttachment {
+  /** MIME type, e.g. `"image/png"` or `"application/pdf"`. */
+  mimeType: string;
+  /** Inline base64 bytes. Set exactly one of `data`/`url`. */
+  data?: string;
+  /** A `data:` URI or a remote `https:` URL the provider fetches. Set exactly one of `data`/`url`. */
+  url?: string;
+  /** Optional display/label name, meaningful mainly for documents. */
+  filename?: string;
 }
 
 /**

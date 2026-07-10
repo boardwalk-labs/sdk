@@ -339,6 +339,7 @@ export type {
 
 export type {
   AgentOptions,
+  AgentAttachment,
   ReasoningEffort,
   ReasoningOptions,
   ToolDef,
