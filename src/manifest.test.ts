@@ -252,6 +252,18 @@ describe("workspace.persist", () => {
   });
 });
 
+describe("recording", () => {
+  it("defaults to undefined (recorded) and accepts the false opt-out", () => {
+    expect(validateMeta({ ...MINIMAL }).recording).toBeUndefined();
+    expect(validateMeta({ ...MINIMAL, recording: false }).recording).toBe(false);
+    expect(validateMeta({ ...MINIMAL, recording: true }).recording).toBe(true);
+  });
+
+  it("rejects a non-boolean recording value", () => {
+    expect(() => validateMeta({ ...MINIMAL, recording: "off" })).toThrow(MetaValidationError);
+  });
+});
+
 describe("platform-extension fields", () => {
   it("validates egress, callable_by, notifications round-trip with toEqual", () => {
     const m = validateMeta({

@@ -259,6 +259,11 @@ export const workflowManifestSchema = z.strictObject({
   input_schema: jsonSchemaObject.optional(),
   output_schema: jsonSchemaObject.optional(),
   workspace: workspaceSchema.optional(),
+  // Session recording (docs/SCREEN_CAPTURE.md §4.5) is ON by default for every hosted run — the
+  // scrub-able history of the run's desktop. The only knob is this opt-out: set `recording: false` to
+  // disable it for the whole run (the recording spans the whole run, so a per-session option is the
+  // wrong shape). Omitted ⇒ recorded.
+  recording: z.boolean().optional(),
   budget: budgetSchema.optional(),
   concurrency: concurrencySchema.default({ mode: "unlimited" }),
   // NO capability fields (tools/mcp/skills/memory) — all per-agent via AgentOptions.

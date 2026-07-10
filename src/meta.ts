@@ -256,6 +256,13 @@ export interface WorkflowMeta {
   input_schema?: Record<string, unknown>;
   output_schema?: Record<string, unknown>;
   workspace?: Workspace;
+  /**
+   * Session recording — a scrub-able video of the run's desktop, ON by default for every hosted run.
+   * Set `recording: false` to disable it for the whole run (recordings are platform observability,
+   * storage-quota-exempt, 30-day retention). The recording spans the whole run, so this is
+   * workflow-level, not per-`agent()`/per-session. Omitted ⇒ recorded.
+   */
+  recording?: boolean;
   budget?: Budget;
   concurrency?: Concurrency;
   // NOTE: there are NO workflow-level capability fields (tools/mcp/skills/memory). All agent
