@@ -4,6 +4,16 @@ Notable changes to `@boardwalk-labs/workflow` — the workflow authoring contrac
 the `meta` → manifest schema, the run-event wire format). Pre-1.0, additive changes ship as
 patch releases.
 
+## 0.1.26
+
+### Added
+
+- **`egress_denied` run-event kind.** A host-observed egress denial on the `log` channel: the runtime
+  substrate's per-host proxy blocked the run's attempt to reach `host` (a `custom`-allowlist miss, or
+  an always-on guard like the private-range/metadata deny). Emitted by the substrate, not the workflow
+  program — it surfaces WHY a fetch failed instead of an opaque network error. Carries
+  `{ host, method?, reason }`; non-terminal.
+
 ## 0.1.21
 
 ### Added
