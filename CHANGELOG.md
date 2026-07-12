@@ -4,6 +4,17 @@ Notable changes to `@boardwalk-labs/workflow` — the workflow authoring contrac
 the `meta` → manifest schema, the run-event wire format). Pre-1.0, additive changes ship as
 patch releases.
 
+## 0.1.27
+
+### Removed
+
+- **`boardwalk/linux-large` hosted runner label.** A larger machine is the `runs_on` `size` selector
+  (`{ label: "boardwalk/linux", size: "large" }`) — a per-run resource override on the one image, never
+  a distinct label. The label was redundant with `size` and had no `-medium`/`-xlarge` peer, so it is
+  dropped from the `runs_on` schema and the `HostedRunsOn` type. Sizing is unchanged: `size` still spans
+  `small`–`xlarge` on any hosted label. A manifest using `boardwalk/linux-large` must switch to the size
+  form.
+
 ## 0.1.26
 
 ### Added
