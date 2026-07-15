@@ -43,6 +43,15 @@ export interface RuntimeContext {
   /** Public API base origin (e.g. `https://api.boardwalk.sh`); append `/v1` or `/mcp/v1` as needed. */
   apiUrl: string;
   /**
+   * Absolute path to the run's WORKSPACE root — the same directory `agent({ cwd })` is resolved
+   * against and the built-in file tools confine to. This is NOT the program's `process.cwd()`: on a
+   * hosted run the program executes from its own bundle directory, so `process.cwd()` points
+   * elsewhere and building paths from it escapes the workspace. Optional — an engine that doesn't
+   * supply it leaves the `runtime.workspaceDir` accessor to fall back to
+   * `WORKSPACE_ROOT`/`process.cwd()`.
+   */
+  workspaceDir?: string;
+  /**
    * A short-lived bearer scoped to this run's manifest permissions, for raw public-API / MCP / CLI
    * use. Fetched on demand (never ambient): pass it into an MCP `headers` block or a subprocess env
    * explicitly. It is redacted from all LLM context, so the agent leaf never sees it.
@@ -182,6 +191,11 @@ export function resetRuntime(): void {
   input = undefined;
   config = {};
   declaredOutput = null;
+}
+
+/** The installed host without throwing (null if none). For helpers with a sensible no-host fallback. */
+export function peekHost(): WorkflowHost | null {
+  return currentHost;
 }
 
 /** The installed host, or a clear error if a hook was called outside a Boardwalk engine. */

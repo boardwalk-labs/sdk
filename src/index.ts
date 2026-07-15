@@ -201,6 +201,18 @@ export const runtime = {
   get apiUrl(): string {
     return requireRuntime().apiUrl;
   },
+  /**
+   * Absolute path to the run's WORKSPACE root — where `agent({ cwd })` resolves and the built-in
+   * file tools work. Use this to build filesystem paths in program code (clone targets, output
+   * dirs) instead of `process.cwd()`: on a hosted run the program executes from a separate bundle
+   * directory, so `${process.cwd()}/repo` escapes the workspace, but `${runtime.workspaceDir}/repo`
+   * is exactly what a later `agent({ cwd: "repo" })` sees. Falls back to `process.env.WORKSPACE_ROOT`
+   * then `process.cwd()` when the engine doesn't supply it (older engines, some local-dev paths), so
+   * it never throws.
+   */
+  get workspaceDir(): string {
+    return requireHost().runtime?.workspaceDir ?? process.env.WORKSPACE_ROOT ?? process.cwd();
+  },
   /** Fetch a short-lived, manifest-scoped bearer for the public API / MCP / CLI. */
   async apiToken(): Promise<string> {
     return await requireRuntime().apiToken();
@@ -285,6 +297,8 @@ export function output(value: JsonValue): void {
 }
 
 export { input, config } from "./host.js";
+
+export { shell, type ShellOptions } from "./shell.js";
 
 export type {
   WorkflowMeta,

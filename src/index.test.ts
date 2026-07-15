@@ -227,6 +227,45 @@ describe("runtime", () => {
     await expect(runtime.idToken("  ")).rejects.toThrow(/non-empty audience/);
     expect(idToken).toHaveBeenCalledTimes(1);
   });
+
+  describe("workspaceDir", () => {
+    const ctx = {
+      runId: "run_1",
+      workflowId: "wf_1",
+      orgId: "org_1",
+      apiUrl: "https://api.boardwalk.sh",
+      apiToken: vi.fn().mockResolvedValue("t"),
+      idToken: vi.fn().mockResolvedValue("j"),
+    };
+
+    it("returns the engine-supplied workspace root", () => {
+      installHost(makeHost({ runtime: { ...ctx, workspaceDir: "/workspace" } }));
+      expect(runtime.workspaceDir).toBe("/workspace");
+    });
+
+    it("falls back to WORKSPACE_ROOT when the engine omits it, never throwing", () => {
+      const prev = process.env.WORKSPACE_ROOT;
+      process.env.WORKSPACE_ROOT = "/env-workspace";
+      try {
+        installHost(makeHost({ runtime: ctx }));
+        expect(runtime.workspaceDir).toBe("/env-workspace");
+      } finally {
+        if (prev === undefined) delete process.env.WORKSPACE_ROOT;
+        else process.env.WORKSPACE_ROOT = prev;
+      }
+    });
+
+    it("falls back to process.cwd() when neither the engine nor the env supplies it", () => {
+      const prev = process.env.WORKSPACE_ROOT;
+      delete process.env.WORKSPACE_ROOT;
+      try {
+        installHost(makeHost({ runtime: ctx }));
+        expect(runtime.workspaceDir).toBe(process.cwd());
+      } finally {
+        if (prev !== undefined) process.env.WORKSPACE_ROOT = prev;
+      }
+    });
+  });
 });
 
 describe("humanInput", () => {
