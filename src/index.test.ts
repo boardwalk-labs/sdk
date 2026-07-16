@@ -298,10 +298,32 @@ describe("parallel", () => {
     expect(result).toEqual([1, 2, 3]);
   });
 
-  it("rejects on the first failure (Promise.all semantics)", async () => {
+  it("isolates a failed thunk to null instead of rejecting the whole batch", async () => {
+    const result = await parallel([
+      () => Promise.resolve(1),
+      () => Promise.reject(new Error("boom")),
+      () => Promise.resolve(3),
+    ]);
+    // Order preserved; the failure is null, the siblings survive.
+    expect(result).toEqual([1, null, 3]);
+    expect(result.filter((r) => r !== null)).toEqual([1, 3]);
+  });
+
+  it("still rejects when a thunk fails with a run-fatal error (budget / cancel)", async () => {
+    const budget = Object.assign(new Error("out of budget"), { code: "BUDGET_EXCEEDED" });
     await expect(
-      parallel([() => Promise.resolve(1), () => Promise.reject(new Error("boom"))]),
-    ).rejects.toThrow("boom");
+      parallel([() => Promise.resolve(1), () => Promise.reject(budget)]),
+    ).rejects.toThrow("out of budget");
+
+    const cancelled = Object.assign(new Error("cancelled"), { code: "CANCELLED" });
+    await expect(
+      parallel([() => Promise.reject(cancelled), () => Promise.resolve(2)]),
+    ).rejects.toThrow("cancelled");
+  });
+
+  it("honors an explicit fatal flag on the rejection", async () => {
+    const fatal = Object.assign(new Error("stop everything"), { fatal: true });
+    await expect(parallel([() => Promise.reject(fatal)])).rejects.toThrow("stop everything");
   });
 });
 

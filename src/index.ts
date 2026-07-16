@@ -284,12 +284,54 @@ export const artifacts = {
 } as const;
 
 /**
- * Run thunks concurrently and resolve to their results in order. A barrier: awaits all of
- * them. Rejects on the first thunk that throws (standard `Promise.all` semantics) — wrap a
- * thunk in your own try/catch if you want failures tolerated.
+ * Run thunks concurrently and resolve to their results in order. A barrier: awaits all of them.
+ *
+ * FAULT-TOLERANT: a thunk that throws is isolated to `null` in its slot (and the failure is logged)
+ * rather than rejecting the whole batch — so one non-deterministic `agent()` failing (a stuck leaf, a
+ * transient model error) doesn't discard the work of its siblings. Filter the nulls to use the
+ * successes: `(await parallel(tasks)).filter((r) => r !== null)`.
+ *
+ * The ONE exception is a run-fatal error — the budget being exhausted or the run being cancelled.
+ * Those still reject `parallel()` (after the other thunks settle), because they mean the whole run
+ * must stop, not that one task failed. Everything else is yours to handle via the nulls.
  */
-export async function parallel<T>(thunks: readonly (() => Promise<T>)[]): Promise<T[]> {
-  return Promise.all(thunks.map((thunk) => thunk()));
+export async function parallel<T>(thunks: readonly (() => Promise<T>)[]): Promise<(T | null)[]> {
+  const settled = await Promise.allSettled(thunks.map((thunk) => thunk()));
+  let fatal: unknown;
+  const results = settled.map((outcome, i) => {
+    if (outcome.status === "fulfilled") return outcome.value;
+    if (isRunFatal(outcome.reason)) {
+      fatal ??= outcome.reason;
+    } else {
+      console.warn(
+        `parallel: task #${String(i)} failed and was isolated to null — ${reasonText(outcome.reason)}`,
+      );
+    }
+    return null;
+  });
+  if (fatal !== undefined) {
+    // Re-throw the ORIGINAL run-fatal rejection (an engine error carrying BUDGET_EXCEEDED /
+    // CANCELLED) so the run terminates with the right code, not a re-wrapped one.
+    // eslint-disable-next-line @typescript-eslint/only-throw-error
+    throw fatal;
+  }
+  return results;
+}
+
+/**
+ * A rejection that must abort the whole run rather than be isolated by {@link parallel}: the
+ * run-terminating engine conditions (budget exhausted, cancellation). Duck-typed — the SDK is the
+ * lower layer and doesn't import the engine's error type — so it reads the stable `code` string (and
+ * an explicit `fatal` flag if a future engine sets one).
+ */
+function isRunFatal(reason: unknown): boolean {
+  const r = reason as { code?: unknown; fatal?: unknown } | null;
+  if (r?.fatal === true) return true;
+  return r?.code === "BUDGET_EXCEEDED" || r?.code === "CANCELLED";
+}
+
+function reasonText(reason: unknown): string {
+  return reason instanceof Error ? reason.message : String(reason);
 }
 
 /**
