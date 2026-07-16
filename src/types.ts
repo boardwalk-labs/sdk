@@ -178,15 +178,17 @@ export interface AgentOptions {
    */
   humanInput?: boolean;
   /**
-   * A ceiling on this leaf's tool-calling turns. OMIT (the default) for NO cap — the loop runs
-   * until the model stops calling tools, bounded by the run budget, the repetition guard, and
-   * cancellation. Set a positive integer to bound a leaf you expect to finish in N turns.
+   * A ceiling on this leaf's tool-calling turns. OMIT (the default) to run under a generous runtime
+   * backstop — the loop runs until the model stops calling tools, bounded by that backstop, the run
+   * budget, the repetition + no-progress guards, and cancellation. Set a positive integer to bound a
+   * leaf tighter (one you expect to finish in N turns), or a larger one to raise the ceiling above the
+   * default backstop for a genuinely long leaf.
    *
-   * A cap does NOT hard-fail the run: on the turn past the ceiling the model is asked once more
-   * with its tools WITHHELD, so it must produce a final answer from the work it has done rather
-   * than the call erroring out. Use it as a cost/latency guardrail on a leaf whose scope you know,
-   * not as a correctness mechanism (a genuinely stuck loop is already caught by the repetition
-   * guard). Per-agent. Non-integer or `< 1` values are ignored (treated as no cap).
+   * A cap does NOT hard-fail the run: on the turn past the ceiling the model is asked once more with
+   * its tools WITHHELD, so it must produce a final answer from the work it has done rather than the
+   * call erroring out. Use it as a cost/latency guardrail on a leaf whose scope you know, not as a
+   * correctness mechanism (a genuinely stuck loop is already caught by the repetition + no-progress
+   * guards). Per-agent. Non-integer or `< 1` values are ignored (the default backstop still applies).
    */
   maxIterations?: number;
   /**
