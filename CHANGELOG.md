@@ -4,6 +4,18 @@ Notable changes to `@boardwalk-labs/workflow` — the workflow authoring contrac
 the `meta` → manifest schema, the run-event wire format). Pre-1.0, additive changes ship as
 patch releases.
 
+## 0.2.5
+
+### Changed (breaking — `parallel()` isolates a failed task instead of rejecting the whole batch)
+
+`parallel()` was `Promise.all`: one thunk that threw rejected the entire call, discarding the work of
+its siblings — so one non-deterministic `agent()` failing (a stuck leaf, a transient model error) took
+down a whole fan-out. It now runs every thunk to completion; a thrown thunk becomes `null` in its slot
+(and the failure is logged), so the healthy tasks survive. Filter the nulls to use the successes:
+`(await parallel(tasks)).filter((r) => r !== null)`. A run-fatal rejection — the budget being exhausted
+or the run cancelled (`code` `BUDGET_EXCEEDED` / `CANCELLED`, or an explicit `fatal` flag) — still
+rejects, because the whole run must stop. The return type is now `(T | null)[]`.
+
 ## 0.2.0
 
 ### Removed (breaking — the determinism tax is deleted)
