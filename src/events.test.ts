@@ -109,6 +109,7 @@ describe("schema round-trips", () => {
       error: { code: "TOOL_FAILED", message: "boom" },
     },
     { ...ENVELOPE, kind: "reasoning_delta", text: "thinking…" },
+    { ...ENVELOPE, kind: "turn_reset" },
     { ...ENVELOPE, kind: "suspended", reason: "human_input" },
     { ...ENVELOPE, kind: "suspended", reason: "sleep", wakeAt: 1_770_000_100_000 },
     { ...ENVELOPE, kind: "resumed" },
@@ -242,6 +243,7 @@ describe("channels", () => {
     expect(channelOf({ kind: "program_output" })).toBe("log");
     expect(channelOf({ kind: "text_delta" })).toBe("agent");
     expect(channelOf({ kind: "tool_call_result" })).toBe("agent");
+    expect(channelOf({ kind: "turn_reset" })).toBe("agent");
   });
 
   it("matchesChannels implements the subscription filter; defaults are quiet", () => {

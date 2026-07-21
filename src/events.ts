@@ -249,6 +249,15 @@ const reasoningDelta = z.strictObject({
   kind: z.literal("reasoning_delta"),
   text: z.string(),
 });
+// The model call for THIS turn dropped mid-stream and was transparently restarted upstream, so every
+// text/reasoning frame already emitted for the turn is VOID — a viewer discards the turn's in-progress
+// text blocks and reasoning and re-renders from the frames that follow. The turn's tool calls and its
+// terminal `turn_ended` are unaffected (the restart replays only the model's own output). Carries no
+// payload beyond the envelope; the `turnId` names the turn to reset.
+const turnReset = z.strictObject({
+  ...envelopeShape,
+  kind: z.literal("turn_reset"),
+});
 
 // -- suspension lifecycle (lifecycle channel) ---------------------------------
 //
@@ -339,6 +348,7 @@ export const runEventSchema = z.discriminatedUnion("kind", [
   toolCallResult,
   toolCallError,
   reasoningDelta,
+  turnReset,
   suspendedEvent,
   resumedEvent,
   humanInputRequestedEvent,
@@ -454,6 +464,7 @@ const KIND_TO_CHANNEL: Record<RunEventKind, Channel> = {
   tool_call_result: "agent",
   tool_call_error: "agent",
   reasoning_delta: "agent",
+  turn_reset: "agent",
   suspended: "lifecycle",
   resumed: "lifecycle",
   human_input_requested: "lifecycle",
