@@ -2,19 +2,33 @@
 
 // @boardwalk-labs/workflow — the author-facing API a workflow program imports.
 //
-//   import { agent, workflows, sleep, secrets, input, type WorkflowMeta } from "@boardwalk-labs/workflow"
+// A workflow is a typed function: you export a `run` function, the platform calls it.
+// The ENTRY CONTRACT is documented, not exported — you write it, Lambda-style (positional
+// params: `input` is param 0, `context` is param 1, optional from the right):
 //
-//   export const meta = { slug: "x", triggers: [{ kind: "manual" }] } satisfies WorkflowMeta
+//   import { agent, phase, secrets } from "@boardwalk-labs/workflow";
 //
-//   const groups = await agent("group failures", { schema: GROUPS })
-//   await parallel(groups.map((g) => () => workflows.call("file-issue", g)))
-//   await sleep({ until: "2026-07-01T00:00:00Z" })
+//   export default async function run(input: Payment, context: Context): Promise<Triage> {
+//     const key = await secrets.get("STRIPE_API_KEY");
+//     phase("analyze");
+//     const note = await agent(`Why did payment ${input.id} fail?`);
+//     return { action: "retry", note };
+//   }
 //
-// These hooks are facades over the installed host (see host.ts). Author programs never
-// install a host — the engine running the program does.
+// The signature carries the data in and the run's metadata; IMPORTS carry everything that
+// acts (exactly `import boto3` in a Lambda); the RETURN is the data out — persisted as the
+// run's output and handed to `workflows.call` parents. There is no ambient `input`, no
+// `output()`, no `config`: input is param 0, output is the return value, and read-only run
+// metadata is param 1 (`Context`).
+//
+// Each capability import is a thin facade over the program↔host protocol (protocol.ts /
+// host_client.ts) — the engine hosts the run; the program holds no platform credentials.
+// Unit tests install an in-process fake instead: `installTestHost({ agent, secrets, ... })`
+// makes `run(input, context)` a plain function call over stubs.
 
-import { requireHost, recordOutput } from "./host.js";
-import type { RuntimeContext } from "./host.js";
+import { getHost, peekHost } from "./host_client.js";
+import { isRunFatal, type UsageSnapshot } from "./protocol.js";
+import { reviveBySchema } from "./revive.js";
 import type {
   AgentOptions,
   ArtifactBody,
@@ -31,7 +45,6 @@ import type {
   HumanMultiSelectResult,
   HumanTextResult,
   JsonSchema,
-  JsonValue,
   PhaseOptions,
   ScheduleOptions,
   SleepArg,
@@ -40,14 +53,25 @@ import type {
 /**
  * Mark the current run phase for live-tail and run-log grouping. Everything after this call
  * belongs to the named phase until the next `phase(...)` marker or the run ends. This is
- * observability-only; it does not checkpoint or skip code on restart.
+ * observability-only (a fire-and-forget marker); it does not checkpoint or skip code on
+ * restart, and it never blocks the program.
  */
 export function phase(name: string, opts?: PhaseOptions): void {
-  const host = requireHost();
-  if (host.setPhase === undefined) {
-    throw new Error("phase is not supported by the installed engine");
+  const host = peekHost();
+  if (host !== null) {
+    host.phase(name, opts);
+    return;
   }
-  host.setPhase(name, opts);
+  // Not connected yet (the marker may be the program's first statement): send once the lazy
+  // connect completes. Fire-and-forget by contract, so a connect failure only warns — the
+  // very next awaited capability call will surface the real error.
+  void getHost()
+    .then((h) => {
+      h.phase(name, opts);
+    })
+    .catch((err: unknown) => {
+      console.warn(`phase(${JSON.stringify(name)}) could not reach the host — ${reasonText(err)}`);
+    });
 }
 
 /**
@@ -61,6 +85,10 @@ export function phase(name: string, opts?: PhaseOptions): void {
  * the provider route automatically (the default `boardwalk` provider on every engine; your own keys
  * only via an explicit provider). Capabilities (`tools`, `mcp`, `skills`, `memory`) are PER-AGENT —
  * each call brings its own; the manifest declares none of them.
+ *
+ * Inline `tools` run IN THE PROGRAM PROCESS (the trusted layer): only their declarations cross
+ * to the host, and the leaf calls the handlers back over the protocol — a handler throw becomes
+ * an ordinary tool-error result for the model, never a run failure.
  */
 export function agent<T>(prompt: string, opts: AgentOptions & { schema: JsonSchema }): Promise<T>;
 export function agent(prompt: string, opts?: AgentOptions): Promise<string>;
@@ -68,7 +96,7 @@ export async function agent<T = string>(prompt: string, opts?: AgentOptions): Pr
   // The host returns `unknown`; the overloads above are the public contract. With a `schema` the
   // host validated the value (best-effort; the run fails on mismatch) → `T`; without one it is the
   // leaf's final text → `string` (the `T = string` default). The cast is confined to this boundary.
-  return (await requireHost().agent(prompt, opts)) as T;
+  return (await (await getHost()).agent(prompt, opts)) as T;
 }
 
 /**
@@ -80,9 +108,15 @@ export const workflows = {
    * Call another workflow as a durable child run. The parent HOLDS while the child runs and
    * resolves to the child's output; the call is idempotent, so a restarted parent re-attaches
    * instead of re-spawning. Use when you need the child's result to continue.
+   *
+   * The child's output arrives REVIVED per the callee's declared output schema — a child
+   * returning a `Date` hands you a `Date` (same for `bigint`, `Uint8Array`, `Set`). An untyped
+   * callee returns plain JSON, honestly. Caller/callee compatibility is by convention (resolve
+   * by slug; the platform is not a schema registry).
    */
   async call(slug: string, input: unknown, opts?: CallOptions): Promise<unknown> {
-    return await requireHost().callWorkflow(slug, input, opts);
+    const { output, outputSchema } = await (await getHost()).callWorkflow(slug, input, opts);
+    return reviveBySchema(output, outputSchema);
   },
   /**
    * Trigger another workflow as a fire-and-forget run. Returns the new run's id WITHOUT
@@ -90,11 +124,7 @@ export const workflows = {
    * restarted parent doesn't double-fire. Use when you want to kick something off and move on.
    */
   async run(slug: string, input: unknown, opts?: CallOptions): Promise<string> {
-    const host = requireHost();
-    if (host.runWorkflow === undefined) {
-      throw new Error("workflows.run is not supported by the installed engine");
-    }
-    return await host.runWorkflow(slug, input, opts);
+    return await (await getHost()).runWorkflow(slug, input, opts);
   },
   /**
    * Schedule another workflow to run later — once at a future instant (`at`) or on a recurrence
@@ -104,15 +134,11 @@ export const workflows = {
    * to the same schedule instead of provisioning a duplicate.
    */
   async schedule(slug: string, input: unknown, opts: ScheduleOptions): Promise<string> {
-    const host = requireHost();
-    if (host.scheduleWorkflow === undefined) {
-      throw new Error("workflows.schedule is not supported by the installed engine");
-    }
     const recurrences = [opts.cron, opts.rate, opts.at].filter((v) => v !== undefined).length;
     if (recurrences !== 1) {
       throw new Error("workflows.schedule requires exactly one of `cron`, `rate`, or `at`");
     }
-    return await host.scheduleWorkflow(slug, input, opts);
+    return await (await getHost()).scheduleWorkflow(slug, input, opts);
   },
 } as const;
 
@@ -124,7 +150,7 @@ export const workflows = {
  * wait. Either way this resolves once the time has elapsed.
  */
 export async function sleep(arg: SleepArg): Promise<void> {
-  await requireHost().sleep(arg);
+  await (await getHost()).sleep(arg);
 }
 
 /**
@@ -150,115 +176,14 @@ export function humanInput(
   opts: HumanInputOptions & { input: HumanInputMultiSelectSpec },
 ): Promise<HumanMultiSelectResult>;
 export async function humanInput(opts: HumanInputOptions): Promise<HumanInputResult> {
-  const host = requireHost();
-  if (host.humanInput === undefined) {
-    throw new Error("humanInput is not supported by the installed engine");
-  }
-  return host.humanInput(opts);
+  return await (await getHost()).humanInput(opts);
 }
 
 /** Granted secrets, resolved lazily and fail-closed against `permissions.secrets`. */
 export const secrets = {
   /** Resolve a granted secret to its plaintext value. */
   async get(name: string): Promise<string> {
-    return await requireHost().getSecret(name);
-  },
-} as const;
-
-/** The installed host's runtime context, or a clear error when the engine doesn't supply one. */
-function requireRuntime(): RuntimeContext {
-  const ctx = requireHost().runtime;
-  if (ctx === undefined) {
-    throw new Error("runtime context is not available in the installed engine");
-  }
-  return ctx;
-}
-
-/**
- * This run's identity + on-demand platform credential. The ids are synchronous; `apiToken()` fetches
- * a short-lived, manifest-scoped bearer for raw public-API / MCP / CLI use. Platform credentials are
- * never placed in `process.env`, so this is the only way trusted program code obtains the bearer —
- * and it is redacted from all LLM context, so the agent leaf never sees it.
- *
- *   const token = await runtime.apiToken();
- *   const mcp = [{ name: "boardwalk", transport: "http", url: `${runtime.apiUrl}/mcp/v1`,
- *                  headers: { Authorization: `Bearer ${token}` } }];
- */
-export const runtime = {
-  /** This run's id. */
-  get runId(): string {
-    return requireRuntime().runId;
-  },
-  /** The workflow this run belongs to. */
-  get workflowId(): string {
-    return requireRuntime().workflowId;
-  },
-  /** The owning org (a run-scoped `apiToken()` already binds it, so callers rarely need this). */
-  get orgId(): string {
-    return requireRuntime().orgId;
-  },
-  /** Public API base origin (e.g. `https://api.boardwalk.sh`); append `/v1` or `/mcp/v1` as needed. */
-  get apiUrl(): string {
-    return requireRuntime().apiUrl;
-  },
-  /**
-   * Absolute path to the run's WORKSPACE root — where `agent({ cwd })` resolves and the built-in
-   * file tools work. It is also the program's own working directory and `HOME`, on every runner, so
-   * a relative path in program code (`./repo`) and `${runtime.workspaceDir}/repo` name the same
-   * place. Prefer this accessor when an ABSOLUTE path is what you need (passing a path to a tool,
-   * logging it); reach for it over `process.cwd()` because it states the intent.
-   *
-   * (This used to say `process.cwd()` pointed at the bundle directory and would "escape the
-   * workspace". That was true of the hosted runners as shipped, and it was a BUG, not a contract —
-   * cwd was `/` on the microVM fleet and `/app` on Fargate, so a program's relative write silently
-   * landed outside the tree `workspace.persist` archives and was thrown away with the VM. The
-   * runner now chdirs to the workspace before author code runs; see WORKSPACE_PERSISTENCE.md I1.)
-   *
-   * Falls back to `process.env.WORKSPACE_ROOT` then `process.cwd()` when the engine doesn't supply
-   * it, so it never throws.
-   */
-  get workspaceDir(): string {
-    return requireHost().runtime?.workspaceDir ?? process.env.WORKSPACE_ROOT ?? process.cwd();
-  },
-  /** Fetch a short-lived, manifest-scoped bearer for the public API / MCP / CLI. */
-  async apiToken(): Promise<string> {
-    return await requireRuntime().apiToken();
-  },
-  /**
-   * Mint a short-lived OIDC id-token asserting this run's identity for `audience`, to exchange
-   * with an external cloud's federation endpoint — keyless AWS/GCP/Azure access instead of
-   * long-lived keys in secrets. Requires `permissions.id_token: "write"` in the workflow's meta,
-   * plus a trust relationship configured in the target cloud (e.g. an AWS IAM OIDC identity
-   * provider for the Boardwalk issuer and a role trust policy pinning `sub` or `org_id`).
-   *
-   *   const jwt = await runtime.idToken("sts.amazonaws.com");
-   *   const sts = new STSClient({ region, signer: noSigner }); // AssumeRoleWithWebIdentity is unsigned
-   *   const creds = await sts.send(new AssumeRoleWithWebIdentityCommand({
-   *     RoleArn: role, RoleSessionName: runtime.runId, WebIdentityToken: jwt }));
-   */
-  async idToken(audience: string): Promise<string> {
-    if (audience.trim() === "") {
-      throw new Error('runtime.idToken requires a non-empty audience (e.g. "sts.amazonaws.com")');
-    }
-    return await requireRuntime().idToken(audience);
-  },
-} as const;
-
-/** Computer use — open in-VM browser/desktop sessions the program owns and hands to agent leaves. */
-export const computer = {
-  /**
-   * Open a live, in-VM browser session (the browser tier of computer use). Returns a
-   * {@link BrowserSession} handle the PROGRAM owns: pass it to `agent(prompt, { session })` to give a
-   * leaf the browser tools (in-VM Playwright MCP attached to this session), and/or drive/inspect it in
-   * plain code (`await s.url()`, `await s.eval(...)`). The session survives suspend/resume. Requires an
-   * engine with a browser backend.
-   */
-  async openBrowser(opts?: BrowserSessionOptions): Promise<BrowserSession> {
-    const host = requireHost();
-    if (host.openBrowserSession === undefined) {
-      throw new Error("computer.openBrowser is not supported by the installed engine");
-    }
-    return await host.openBrowserSession(opts);
+    return await (await getHost()).getSecret(name);
   },
 } as const;
 
@@ -275,11 +200,65 @@ export const artifacts = {
     body: ArtifactBody,
     metadata?: Record<string, unknown>,
   ): Promise<ArtifactRef> {
-    const host = requireHost();
-    if (host.writeArtifact === undefined) {
-      throw new Error("artifacts.write is not supported by the installed engine");
+    return await (await getHost()).writeArtifact(name, contentType, body, metadata);
+  },
+} as const;
+
+/** Computer use — open in-VM browser/desktop sessions the program owns and hands to agent leaves. */
+export const computer = {
+  /**
+   * Open a live, in-VM browser session (the browser tier of computer use). Returns a
+   * {@link BrowserSession} handle the PROGRAM owns: pass it to `agent(prompt, { session })` to give a
+   * leaf the browser tools (in-VM Playwright MCP attached to this session), and/or drive/inspect it in
+   * plain code (`await s.url()`, `await s.eval(...)`). The session survives suspend/resume. Requires an
+   * engine with a browser backend.
+   */
+  async openBrowser(opts?: BrowserSessionOptions): Promise<BrowserSession> {
+    return await (await getHost()).openBrowser(opts);
+  },
+} as const;
+
+/**
+ * Short-lived credentials, minted on demand — actions, so they are IMPORTS, not `context`
+ * fields (`context` is read-only data and carries nothing that acts). Both mints are redacted
+ * from all LLM context; the agent leaf never sees them.
+ */
+export const auth = {
+  /**
+   * Mint a short-lived OIDC id-token (JWT) asserting this run's identity for `audience`, to
+   * exchange with an external cloud's federation endpoint — keyless AWS/GCP/Azure access instead
+   * of long-lived keys in secrets. Requires `permissions.id_token: "write"`, plus a trust
+   * relationship configured in the target cloud (e.g. an AWS IAM OIDC identity provider for the
+   * Boardwalk issuer and a role trust policy pinning `sub` or `org_id`).
+   *
+   *   const jwt = await auth.idToken("sts.amazonaws.com");
+   */
+  async idToken(audience: string): Promise<string> {
+    if (audience.trim() === "") {
+      throw new Error('auth.idToken requires a non-empty audience (e.g. "sts.amazonaws.com")');
     }
-    return await host.writeArtifact(name, contentType, body, metadata);
+    return await (await getHost()).idToken(audience);
+  },
+  /**
+   * Fetch a short-lived, manifest-scoped bearer for the public API / MCP / CLI. Fetched on
+   * demand (never ambient): pass it into an MCP `headers` block or a subprocess env explicitly.
+   */
+  async apiToken(): Promise<string> {
+    return await (await getHost()).apiToken();
+  },
+} as const;
+
+/**
+ * Live budget state, for authors who want to self-govern gracefully before the platform's
+ * budget pause safety-net kicks in.
+ */
+export const usage = {
+  /**
+   * The run's current budget state: `{ spent, cap, remaining }` per dimension (`usd`, `tokens`,
+   * `compute_seconds`), with `cap`/`remaining` null when a dimension is uncapped.
+   */
+  async get(): Promise<UsageSnapshot> {
+    return await (await getHost()).usage();
   },
 } as const;
 
@@ -318,36 +297,27 @@ export async function parallel<T>(thunks: readonly (() => Promise<T>)[]): Promis
   return results;
 }
 
-/**
- * A rejection that must abort the whole run rather than be isolated by {@link parallel}: the
- * run-terminating engine conditions (budget exhausted, cancellation). Duck-typed — the SDK is the
- * lower layer and doesn't import the engine's error type — so it reads the stable `code` string (and
- * an explicit `fatal` flag if a future engine sets one).
- */
-function isRunFatal(reason: unknown): boolean {
-  const r = reason as { code?: unknown; fatal?: unknown } | null;
-  if (r?.fatal === true) return true;
-  return r?.code === "BUDGET_EXCEEDED" || r?.code === "CANCELLED";
-}
-
 function reasonText(reason: unknown): string {
   return reason instanceof Error ? reason.message : String(reason);
 }
 
-/**
- * Declare the run's output — its final result. Since a workflow program is top-level module
- * code (it can't `return`), this is how you set what the run produced: the value a
- * `workflows.call` parent receives, what the run log shows as the result, and the `output`
- * event in the run's stream. Last call wins; never calling it leaves the output null. The
- * value must be JSON-serializable and is validated against `meta.output_schema` when declared.
- */
-export function output(value: JsonValue): void {
-  recordOutput(value);
-}
+export { shell, type ShellOptions, type ShellResult } from "./shell.js";
 
-export { input, config } from "./host.js";
+// The read-only run metadata (`run`'s second parameter) and its parts.
+export {
+  HostError,
+  isRunFatal,
+  RUN_FATAL_CODES,
+  type Actor,
+  type Context,
+  type ContextData,
+  type TriggerInfo,
+  type UsageDimension,
+  type UsageSnapshot,
+} from "./protocol.js";
 
-export { shell, type ShellOptions } from "./shell.js";
+// Unit-testing surface: an in-process fake host, so `run(input, context)` is a plain call.
+export { installTestHost, type TestHostHandle, type TestHostOverrides } from "./host_client.js";
 
 export type {
   WorkflowMeta,

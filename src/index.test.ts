@@ -1,290 +1,224 @@
 // SPDX-License-Identifier: MIT
 
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   agent,
   artifacts,
+  auth,
   computer,
   humanInput,
-  output,
+  installTestHost,
   parallel,
   phase,
-  runtime,
   secrets,
+  shell,
   sleep,
+  usage,
   workflows,
 } from "./index.js";
-import type { BrowserSession } from "./index.js";
-import {
-  installConfig,
-  installHost,
-  installInput,
-  resetRuntime,
-  takeDeclaredOutput,
-  type WorkflowHost,
-} from "./runtime.js";
+import type { BrowserSession, Context, ShellResult } from "./index.js";
+import { resetHost } from "./host_client.js";
 
-function makeHost(overrides: Partial<WorkflowHost> = {}): WorkflowHost {
-  return {
-    agent: vi.fn().mockResolvedValue("agent-result"),
-    callWorkflow: vi.fn().mockResolvedValue({ ok: true }),
-    sleep: vi.fn().mockResolvedValue(undefined),
-    getSecret: vi.fn().mockResolvedValue("s3cret"),
-    ...overrides,
-  };
-}
+const HOST_SOCK_ENV = "BOARDWALK_HOST_SOCK";
+let savedSock: string | undefined;
 
 beforeEach(() => {
-  resetRuntime();
+  savedSock = process.env[HOST_SOCK_ENV];
+  delete process.env[HOST_SOCK_ENV]; // no ambient host — tests opt in via installTestHost
+  resetHost();
 });
 
-describe("host installation", () => {
-  it("throws a clear error when a hook is called with no host installed", async () => {
-    await expect(agent("hi")).rejects.toThrow(/no host installed/);
+afterEach(() => {
+  if (savedSock === undefined) delete process.env[HOST_SOCK_ENV];
+  else process.env[HOST_SOCK_ENV] = savedSock;
+  resetHost();
+});
+
+describe("no host", () => {
+  it("rejects with a clear error when no test host is installed and no socket is named", async () => {
+    await expect(agent("hi")).rejects.toThrow(/no host available/);
+    await expect(agent("hi")).rejects.toThrow(/installTestHost/);
   });
 });
 
 describe("agent", () => {
   it("delegates to the host and returns its result", async () => {
     const agentFn = vi.fn().mockResolvedValue("agent-result");
-    installHost(makeHost({ agent: agentFn }));
+    installTestHost({ agent: agentFn });
     await expect(agent("summarize")).resolves.toBe("agent-result");
     expect(agentFn).toHaveBeenCalledWith("summarize", undefined);
   });
 
   it("passes options through verbatim (model optional)", async () => {
     const agentFn = vi.fn().mockResolvedValue("r");
-    installHost(makeHost({ agent: agentFn }));
+    installTestHost({ agent: agentFn });
     const opts = { model: "anthropic/claude-sonnet-4.5", memory: "memory/triager" };
     await agent("p", opts);
     expect(agentFn).toHaveBeenCalledWith("p", opts);
+  });
+
+  it("throws the not-stubbed error when agent is not provided", async () => {
+    installTestHost({});
+    await expect(agent("p")).rejects.toThrow(/agent is not stubbed/);
   });
 });
 
 describe("workflows", () => {
   it("call delegates and resolves the child output", async () => {
-    const callWorkflow = vi.fn().mockResolvedValue({ ok: true });
-    installHost(makeHost({ callWorkflow }));
+    const call = vi.fn().mockResolvedValue({ ok: true });
+    installTestHost({ workflows: { call } });
     await expect(workflows.call("child", { a: 1 })).resolves.toEqual({ ok: true });
-    expect(callWorkflow).toHaveBeenCalledWith("child", { a: 1 }, undefined);
+    expect(call).toHaveBeenCalledWith("child", { a: 1 }, undefined);
   });
 
-  it("run requires host support and surfaces a clear error without it", async () => {
-    installHost(makeHost());
-    await expect(workflows.run("child", {})).rejects.toThrow(/not supported/);
-  });
-
-  it("run resolves the child run id when supported", async () => {
-    const runWorkflow = vi.fn().mockResolvedValue("run_123");
-    installHost(makeHost({ runWorkflow }));
+  it("run resolves the child run id and passes opts through", async () => {
+    const run = vi.fn().mockResolvedValue("run_123");
+    installTestHost({ workflows: { run } });
     await expect(workflows.run("child", {}, { idempotencyKey: "k" })).resolves.toBe("run_123");
-    expect(runWorkflow).toHaveBeenCalledWith("child", {}, { idempotencyKey: "k" });
-  });
-
-  it("schedule requires host support and surfaces a clear error without it", async () => {
-    installHost(makeHost());
-    await expect(workflows.schedule("child", {}, { at: "2026-07-01T00:00:00Z" })).rejects.toThrow(
-      /not supported/,
-    );
+    expect(run).toHaveBeenCalledWith("child", {}, { idempotencyKey: "k" });
   });
 
   it("schedule resolves the schedule id and passes opts through", async () => {
-    const scheduleWorkflow = vi.fn().mockResolvedValue("sched_123");
-    installHost(makeHost({ scheduleWorkflow }));
+    const schedule = vi.fn().mockResolvedValue("sched_123");
+    installTestHost({ workflows: { schedule } });
     const opts = { cron: "0 9 * * MON", timezone: "America/Anchorage" };
     await expect(workflows.schedule("report", { team: "growth" }, opts)).resolves.toBe("sched_123");
-    expect(scheduleWorkflow).toHaveBeenCalledWith("report", { team: "growth" }, opts);
+    expect(schedule).toHaveBeenCalledWith("report", { team: "growth" }, opts);
   });
 
   it("schedule rejects when zero or multiple recurrences are given", async () => {
-    const scheduleWorkflow = vi.fn().mockResolvedValue("sched_123");
-    installHost(makeHost({ scheduleWorkflow }));
+    const schedule = vi.fn().mockResolvedValue("sched_123");
+    installTestHost({ workflows: { schedule } });
     await expect(workflows.schedule("x", {}, {})).rejects.toThrow(/exactly one/);
     await expect(
       workflows.schedule("x", {}, { cron: "* * * * *", rate: "5 minutes" }),
     ).rejects.toThrow(/exactly one/);
-    expect(scheduleWorkflow).not.toHaveBeenCalled();
+    expect(schedule).not.toHaveBeenCalled();
+  });
+
+  it("call/run/schedule throw the not-stubbed error when not provided", async () => {
+    installTestHost({});
+    await expect(workflows.call("c", {})).rejects.toThrow(/workflows.call is not stubbed/);
+    await expect(workflows.run("c", {})).rejects.toThrow(/workflows.run is not stubbed/);
+    await expect(workflows.schedule("c", {}, { at: "2026-07-01T00:00:00Z" })).rejects.toThrow(
+      /workflows.schedule is not stubbed/,
+    );
   });
 });
 
-describe("sleep / secrets / phase / artifacts", () => {
-  it("sleep delegates every arg form", async () => {
+describe("sleep / secrets / phase / artifacts / shell", () => {
+  it("sleep delegates every arg form and defaults to resolving immediately", async () => {
     const sleepFn = vi.fn().mockResolvedValue(undefined);
-    installHost(makeHost({ sleep: sleepFn }));
+    installTestHost({ sleep: sleepFn });
     await sleep(50);
     await sleep({ durationMs: 100 });
     await sleep({ until: "2026-07-01T00:00:00Z" });
     expect(sleepFn).toHaveBeenCalledTimes(3);
+
+    installTestHost({}); // no stub: still resolves (a test never actually waits)
+    await expect(sleep(10_000)).resolves.toBeUndefined();
   });
 
-  it("secrets.get resolves through the host", async () => {
-    installHost(makeHost());
+  it("secrets.get resolves from a record stub and errors on a missing name", async () => {
+    installTestHost({ secrets: { GITHUB_TOKEN: "s3cret" } });
     await expect(secrets.get("GITHUB_TOKEN")).resolves.toBe("s3cret");
+    await expect(secrets.get("MISSING")).rejects.toThrow(/secret "MISSING" is not stubbed/);
   });
 
-  it("phase throws when the engine has no setPhase", () => {
-    installHost(makeHost());
-    expect(() => phase("plan")).toThrow(/not supported/);
+  it("secrets.get resolves through a resolver-function stub", async () => {
+    installTestHost({ secrets: (name) => `v:${name}` });
+    await expect(secrets.get("A")).resolves.toBe("v:A");
   });
 
-  it("phase delegates when supported", () => {
-    const setPhase = vi.fn();
-    installHost(makeHost({ setPhase }));
+  it("phase delegates when stubbed and is a silent no-op otherwise", () => {
+    const phaseFn = vi.fn();
+    installTestHost({ phase: phaseFn });
     phase("plan", { id: "p1" });
-    expect(setPhase).toHaveBeenCalledWith("plan", { id: "p1" });
+    expect(phaseFn).toHaveBeenCalledWith("plan", { id: "p1" });
+
+    installTestHost({});
+    expect(() => {
+      phase("plan");
+    }).not.toThrow();
   });
 
-  it("artifacts.write throws when unsupported and delegates when supported", async () => {
-    installHost(makeHost());
-    await expect(artifacts.write("a.txt", "text/plain", "hi")).rejects.toThrow(/not supported/);
-
-    const writeArtifact = vi
-      .fn()
-      .mockResolvedValue({ id: "art_1", name: "a.txt", url: "file:///a.txt" });
-    installHost(makeHost({ writeArtifact }));
+  it("artifacts.write delegates and resolves the ref", async () => {
+    const write = vi.fn().mockResolvedValue({ id: "art_1", name: "a.txt", url: "file:///a.txt" });
+    installTestHost({ artifacts: { write } });
     await expect(artifacts.write("a.txt", "text/plain", "hi")).resolves.toEqual({
       id: "art_1",
       name: "a.txt",
       url: "file:///a.txt",
     });
+    expect(write).toHaveBeenCalledWith("a.txt", "text/plain", "hi", undefined);
+  });
+
+  it("shell resolves the completed command, exit code included", async () => {
+    const result: ShellResult = { exitCode: 3, stdout: "", stderr: "boom" };
+    const shellFn = vi.fn().mockResolvedValue(result);
+    installTestHost({ shell: shellFn });
+    await expect(shell("exit 3", { cwd: "/workspace" })).resolves.toEqual(result);
+    expect(shellFn).toHaveBeenCalledWith("exit 3", { cwd: "/workspace" });
   });
 });
 
 describe("computer.openBrowser", () => {
-  it("throws when unsupported and delegates (forwarding opts) when supported", async () => {
-    installHost(makeHost());
-    await expect(computer.openBrowser()).rejects.toThrow(/not supported/);
-
+  it("delegates (forwarding opts) and passes the session through agent({ session })", async () => {
     const session = { id: "sess_1" } as unknown as BrowserSession;
-    const openBrowserSession = vi.fn().mockResolvedValue(session);
-    installHost(makeHost({ openBrowserSession }));
-
-    await expect(computer.openBrowser({ startUrl: "https://example.com" })).resolves.toBe(session);
-    expect(openBrowserSession).toHaveBeenCalledWith({ startUrl: "https://example.com" });
-  });
-
-  it("passes a returned session through agent({ session })", async () => {
-    const session = { id: "sess_2" } as unknown as BrowserSession;
+    const openBrowser = vi.fn().mockResolvedValue(session);
     const agentFn = vi.fn().mockResolvedValue("done");
-    installHost(
-      makeHost({ agent: agentFn, openBrowserSession: vi.fn().mockResolvedValue(session) }),
-    );
+    installTestHost({ agent: agentFn, computer: { openBrowser } });
 
-    const s = await computer.openBrowser();
+    const s = await computer.openBrowser({ startUrl: "https://example.com" });
+    expect(openBrowser).toHaveBeenCalledWith({ startUrl: "https://example.com" });
     await agent("drive it", { session: s });
     expect(agentFn).toHaveBeenCalledWith("drive it", { session });
   });
 });
 
-describe("runtime", () => {
-  it("throws a clear error when the engine supplies no runtime context", async () => {
-    installHost(makeHost());
-    expect(() => runtime.runId).toThrow(/runtime context is not available/);
-    await expect(runtime.apiToken()).rejects.toThrow(/runtime context is not available/);
-    await expect(runtime.idToken("sts.amazonaws.com")).rejects.toThrow(
-      /runtime context is not available/,
-    );
-  });
-
-  it("exposes ids synchronously and resolves apiToken through the host", async () => {
-    const apiToken = vi.fn().mockResolvedValue("run-api-token");
-    installHost(
-      makeHost({
-        runtime: {
-          runId: "run_1",
-          workflowId: "wf_1",
-          orgId: "org_1",
-          apiUrl: "https://api.boardwalk.sh",
-          apiToken,
-          idToken: vi.fn().mockResolvedValue("oidc-jwt"),
-        },
-      }),
-    );
-    expect(runtime.runId).toBe("run_1");
-    expect(runtime.workflowId).toBe("wf_1");
-    expect(runtime.orgId).toBe("org_1");
-    expect(runtime.apiUrl).toBe("https://api.boardwalk.sh");
-    await expect(runtime.apiToken()).resolves.toBe("run-api-token");
-    expect(apiToken).toHaveBeenCalledTimes(1);
-  });
-
-  it("resolves idToken through the host, forwarding the audience", async () => {
-    const idToken = vi.fn().mockResolvedValue("oidc-jwt");
-    installHost(
-      makeHost({
-        runtime: {
-          runId: "run_1",
-          workflowId: "wf_1",
-          orgId: "org_1",
-          apiUrl: "https://api.boardwalk.sh",
-          apiToken: vi.fn().mockResolvedValue("run-api-token"),
-          idToken,
-        },
-      }),
-    );
-    await expect(runtime.idToken("sts.amazonaws.com")).resolves.toBe("oidc-jwt");
-    expect(idToken).toHaveBeenCalledWith("sts.amazonaws.com");
-    await expect(runtime.idToken("  ")).rejects.toThrow(/non-empty audience/);
-    expect(idToken).toHaveBeenCalledTimes(1);
-  });
-
-  describe("workspaceDir", () => {
-    const ctx = {
-      runId: "run_1",
-      workflowId: "wf_1",
-      orgId: "org_1",
-      apiUrl: "https://api.boardwalk.sh",
-      apiToken: vi.fn().mockResolvedValue("t"),
-      idToken: vi.fn().mockResolvedValue("j"),
-    };
-
-    it("returns the engine-supplied workspace root", () => {
-      installHost(makeHost({ runtime: { ...ctx, workspaceDir: "/workspace" } }));
-      expect(runtime.workspaceDir).toBe("/workspace");
-    });
-
-    it("falls back to WORKSPACE_ROOT when the engine omits it, never throwing", () => {
-      const prev = process.env.WORKSPACE_ROOT;
-      process.env.WORKSPACE_ROOT = "/env-workspace";
-      try {
-        installHost(makeHost({ runtime: ctx }));
-        expect(runtime.workspaceDir).toBe("/env-workspace");
-      } finally {
-        if (prev === undefined) delete process.env.WORKSPACE_ROOT;
-        else process.env.WORKSPACE_ROOT = prev;
-      }
-    });
-
-    it("falls back to process.cwd() when neither the engine nor the env supplies it", () => {
-      const prev = process.env.WORKSPACE_ROOT;
-      delete process.env.WORKSPACE_ROOT;
-      try {
-        installHost(makeHost({ runtime: ctx }));
-        expect(runtime.workspaceDir).toBe(process.cwd());
-      } finally {
-        if (prev !== undefined) process.env.WORKSPACE_ROOT = prev;
-      }
-    });
-  });
-});
-
 describe("humanInput", () => {
-  it("requires host support and surfaces a clear error without it", async () => {
-    installHost(makeHost());
-    await expect(humanInput({ prompt: "ok?", input: { kind: "text" } })).rejects.toThrow(
-      /not supported/,
-    );
-  });
-
   it("delegates the opts and resolves the validated result", async () => {
     const humanInputFn = vi.fn().mockResolvedValue({ value: "Approve", isOther: false });
-    installHost(makeHost({ humanInput: humanInputFn }));
+    installTestHost({ humanInput: humanInputFn });
     const opts = {
       prompt: "Approve?",
       input: { kind: "choice", options: ["Approve", "Reject"] },
     } as const;
     await expect(humanInput(opts)).resolves.toEqual({ value: "Approve", isOther: false });
     expect(humanInputFn).toHaveBeenCalledWith(opts);
+  });
+});
+
+describe("auth / usage", () => {
+  it("auth.idToken forwards the audience and rejects a blank one without calling the host", async () => {
+    const idToken = vi.fn().mockResolvedValue("oidc-jwt");
+    installTestHost({ auth: { idToken } });
+    await expect(auth.idToken("sts.amazonaws.com")).resolves.toBe("oidc-jwt");
+    expect(idToken).toHaveBeenCalledWith("sts.amazonaws.com");
+    await expect(auth.idToken("  ")).rejects.toThrow(/non-empty audience/);
+    expect(idToken).toHaveBeenCalledTimes(1);
+  });
+
+  it("auth.apiToken delegates", async () => {
+    installTestHost({ auth: { apiToken: () => "bearer-1" } });
+    await expect(auth.apiToken()).resolves.toBe("bearer-1");
+  });
+
+  it("usage.get defaults to zero spend with no caps and delegates when stubbed", async () => {
+    installTestHost({});
+    await expect(usage.get()).resolves.toEqual({
+      usd: { spent: 0, cap: null, remaining: null },
+      tokens: { spent: 0, cap: null, remaining: null },
+      compute_seconds: { spent: 0, cap: null, remaining: null },
+    });
+
+    const snapshot = {
+      usd: { spent: 1.25, cap: 10, remaining: 8.75 },
+      tokens: { spent: 5000, cap: null, remaining: null },
+      compute_seconds: { spent: 42, cap: 3600, remaining: 3558 },
+    };
+    installTestHost({ usage: () => snapshot });
+    await expect(usage.get()).resolves.toEqual(snapshot);
   });
 });
 
@@ -327,22 +261,70 @@ describe("parallel", () => {
   });
 });
 
-describe("output / input / config", () => {
-  it("output records last-write-wins; explicit null is distinguishable from never-set", () => {
-    expect(takeDeclaredOutput()).toBeNull();
-    output({ a: 1 });
-    output("final");
-    expect(takeDeclaredOutput()).toEqual({ value: "final" });
-    output(null);
-    expect(takeDeclaredOutput()).toEqual({ value: null });
+describe("the test-host handle", () => {
+  it("builds a plausible frozen Context wired to the host's signal, with overrides", () => {
+    const host = installTestHost({});
+    const ctx = host.context({ runId: "01RUNOVERRIDE0000000000000", attempt: 3 });
+    expect(ctx.runId).toBe("01RUNOVERRIDE0000000000000");
+    expect(ctx.attempt).toBe(3);
+    expect(ctx.workflowVersion).toBe(1);
+    expect(ctx.environment).toBeNull();
+    expect(ctx.actor.type).toBe("user");
+    expect(ctx.trigger.kind).toBe("manual");
+    expect(ctx.signal).toBe(host.signal);
+    expect(Object.isFrozen(ctx)).toBe(true);
   });
 
-  it("input and config are live bindings installed by the engine", async () => {
-    installInput({ ticket: 42 });
-    installConfig({ model: "x/y" });
-    const mod = await import("./index.js");
-    expect(mod.input).toEqual({ ticket: 42 });
-    expect(mod.config).toEqual({ model: "x/y" });
-    expect(Object.isFrozen(mod.config)).toBe(true);
+  it("cancel() aborts the signal with a CANCELLED reason", () => {
+    const host = installTestHost({});
+    const ctx = host.context();
+    expect(ctx.signal.aborted).toBe(false);
+    host.cancel();
+    expect(ctx.signal.aborted).toBe(true);
+    expect(ctx.signal.reason).toMatchObject({ code: "CANCELLED" });
+  });
+
+  it("uninstall() removes the host", async () => {
+    const host = installTestHost({ agent: () => "x" });
+    await expect(agent("p")).resolves.toBe("x");
+    host.uninstall();
+    await expect(agent("p")).rejects.toThrow(/no host available/);
+  });
+});
+
+describe("a sample run() as a plain unit-test call", () => {
+  // The entry contract: authors write `export default async function run(input, context)`.
+  interface Payment {
+    id: string;
+    amountUsd: number;
+  }
+  interface Triage {
+    action: "retry" | "refund";
+    note: string;
+    by: string;
+  }
+
+  async function run(input: Payment, context: Context): Promise<Triage> {
+    const key = await secrets.get("STRIPE_API_KEY");
+    phase("analyze");
+    const note = await agent(`Why did payment ${input.id} for $${input.amountUsd} fail? (${key})`);
+    return { action: "retry", note, by: context.runId };
+  }
+
+  it("runs over stubs with no socket and no engine", async () => {
+    const phases: string[] = [];
+    const host = installTestHost({
+      agent: (prompt) => `analysis of: ${prompt.slice(0, 19)}`,
+      secrets: { STRIPE_API_KEY: "sk_test_1" },
+      phase: (name) => phases.push(name),
+    });
+
+    const out = await run({ id: "pay_1", amountUsd: 12 }, host.context());
+    expect(out).toEqual({
+      action: "retry",
+      note: "analysis of: Why did payment pay",
+      by: "01TESTRUN00000000000000000",
+    });
+    expect(phases).toEqual(["analyze"]);
   });
 });

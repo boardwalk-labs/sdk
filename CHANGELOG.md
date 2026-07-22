@@ -4,6 +4,58 @@ Notable changes to `@boardwalk-labs/workflow` — the workflow authoring contrac
 the `meta` → manifest schema, the run-event wire format). Pre-1.0, additive changes ship as
 patch releases.
 
+## Unreleased
+
+### Changed (breaking — the function model: `run(input, context)` + the host protocol)
+
+The workflow-format redesign lands its SDK half (P0 + P2; an approved clean break — published
+consumers pin old versions). A workflow is now a **typed function**: you
+`export default async function run(input, context)` and the platform calls it — the module body
+no longer executes as the run, input is param 0, the output is the return value, and read-only
+run metadata is param 1.
+
+- **New: the program↔host protocol (`protocol.ts`).** Capabilities are now thin clients of a
+  JSON-RPC 2.0 contract over the local socket named by `BOARDWALK_HOST_SOCK` (Unix socket;
+  named pipe on win32), newline-delimited JSON frames, runner = server / SDK = client — one
+  contract both the TS and Python SDKs speak. Zod schemas + types are exported for every
+  method: loader-only `bootstrap` / `report_return`; the author capabilities (`agent`,
+  `workflows.*`, `sleep`, `humanInput`, `secrets.get`, `artifacts.write`,
+  `computer.openBrowser` + the `computer.browser.*` sub-namespace, `shell`, `auth.*`,
+  `usage.get`); the `phase` notification; the full-duplex host→client `tool_invoke` callback
+  (inline `agent()` tools cross as declarations only — `{name, description, input_schema}` —
+  and their handlers run in the program process; a handler throw is a tool-error result, never
+  run-fatal); and the host→client `cancel` notification. Errors are `{code, message, data?}`
+  with STRING taxonomy codes; `isRunFatal` / `RUN_FATAL_CODES` / `HostError` are exported.
+- **New: `Context`** (+ `TriggerInfo`, `Actor`) — the frozen v1 field set: `runId`,
+  `workflowId`, `workflowVersion`, `orgId`, `environment`, `actor`, `attempt`, `trigger`,
+  `workspaceDir`, `signal`. The wire carries context DATA only; the client synthesizes
+  `signal` from `cancel`. Append-only forever.
+- **New: `auth.{idToken, apiToken}`** (the credential mints, split out of the removed
+  `runtime`) and **`usage.get()`** (live `{spent, cap, remaining}` per budget dimension —
+  `usd`, `tokens`, `compute_seconds`; `cap`/`remaining` null when uncapped).
+- **New: `installTestHost(overrides)`** — an in-process fake host, so `run(input, context)` is
+  a plain unit-test call over stubs (no socket, no engine). Its handle builds a plausible
+  frozen `Context` and can simulate cancellation. Replaces the `/runtime`
+  `installHost`/`installInput`/`installConfig` seam.
+- **Changed: `workflows.call` revives its result.** The call's result carries the callee's
+  `output_schema`, and the SDK applies a generic schema-guided revival pass (exported as
+  `reviveBySchema` on `/runtime`): ISO date-time → `Date`, integer-pattern string → `bigint`,
+  base64 → `Uint8Array`, uniqueItems array → `Set`. An untyped callee returns plain JSON.
+- **Changed: `shell()` is protocol-backed and async** — `Promise<ShellResult>`
+  (`{exitCode, stdout, stderr}`); a non-zero exit resolves (check `exitCode`) instead of
+  throwing, and it no longer runs `execSync` in-process.
+- **Changed: `/runtime`** is now the engine/loader-facing surface: `connectHost` /
+  `HostClient` (with `bootstrap()` / `reportReturn()`), the protocol schemas, and
+  `reviveBySchema`.
+- **Removed:** the `input` and `config` live bindings, `output()`, the `runtime` namespace
+  (ids live on `context`; the mints are `auth.*`), the `WorkflowHost`/`RuntimeContext` seam
+  (`installHost`, `installInput`, `installConfig`, `takeDeclaredOutput`, `resetRuntime`,
+  `requireHost`, and the internal `recordOutput` path — `src/host.ts` is deleted).
+- **Unchanged:** the manifest module (`workflowManifestSchema`, `validateMeta`,
+  `WorkflowMeta`; descriptor changes are a later phase), the `/extract` subpath, the
+  run-event wire format exports, `normalizeReasoning`, `parallel()` semantics, and the
+  `agent()` author surface (`AgentOptions` incl. `ToolDef`).
+
 ## 0.2.5
 
 ### Changed (breaking — `parallel()` isolates a failed task instead of rejecting the whole batch)
