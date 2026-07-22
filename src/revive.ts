@@ -19,7 +19,7 @@
 // non-integer string) is passed through unchanged — the same "run() sees what actually
 // arrived" doctrine as input conversion. Pure logic, no I/O.
 
-import type { JsonSchema } from "./types.js";
+import type { JsonSchema, JsonValue } from "./types.js";
 
 /** The exact `pattern` the derivation emits for a TS `bigint` (see WORKFLOW_TYPED_IO A.9). */
 const BIGINT_PATTERN = "^-?\\d+$";
@@ -136,4 +136,72 @@ function resolveLocalRef(ref: string, root: unknown): unknown {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+// ============================================================================
+// The canonical ENCODE pass — rich runtime values → wire JSON (revival's inverse)
+// ============================================================================
+
+/**
+ * Encode a value into its canonical wire JSON (WORKFLOW_TYPED_IO A.9), schema-free:
+ * `Date` → ISO-8601 string, `bigint` → decimal string, `Uint8Array` → base64, `Set` → array.
+ * Non-JSON scalars (`NaN`/`Infinity`) and non-data values (functions, symbols) become `null`
+ * (or are omitted as object properties, matching `JSON.stringify`) — dropped, never a crash.
+ * An object with `toJSON()` is encoded via it (again `JSON.stringify` parity). Runs CLIENT-SIDE
+ * on everything the program hands the host — the run's return (`report_return`), `workflows.*`
+ * inputs, and `tool_invoke` handler outputs — because a rich value cannot cross the wire.
+ */
+export function encodeCanonical(value: unknown): JsonValue {
+  const encoded = encodeNode(value);
+  return encoded === OMIT ? null : encoded;
+}
+
+/** Sentinel: "omit this property" (functions/symbols/undefined inside objects). */
+const OMIT = Symbol("omit");
+
+function encodeNode(value: unknown): JsonValue | typeof OMIT {
+  if (value === null) return null;
+  switch (typeof value) {
+    case "string":
+    case "boolean":
+      return value;
+    case "number":
+      return Number.isFinite(value) ? value : null;
+    case "bigint":
+      return value.toString();
+    case "undefined":
+    case "function":
+    case "symbol":
+      return OMIT;
+    default:
+      break;
+  }
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value.toISOString();
+  }
+  if (value instanceof Uint8Array) {
+    return Buffer.from(value.buffer, value.byteOffset, value.byteLength).toString("base64");
+  }
+  if (value instanceof Set) {
+    return [...value].map((item) => {
+      const encoded = encodeNode(item);
+      return encoded === OMIT ? null : encoded;
+    });
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => {
+      const encoded = encodeNode(item);
+      return encoded === OMIT ? null : encoded;
+    });
+  }
+  const withToJson = value as { toJSON?: unknown };
+  if (typeof withToJson.toJSON === "function") {
+    return encodeNode((withToJson.toJSON as () => unknown)());
+  }
+  const out: Record<string, JsonValue> = {};
+  for (const [key, entry] of Object.entries(value)) {
+    const encoded = encodeNode(entry);
+    if (encoded !== OMIT) out[key] = encoded;
+  }
+  return out;
 }

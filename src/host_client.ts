@@ -41,7 +41,7 @@ import {
   type ToolDeclaration,
   type UsageSnapshot,
 } from "./protocol.js";
-import { reviveBySchema } from "./revive.js";
+import { encodeCanonical, reviveBySchema } from "./revive.js";
 import type { ShellOptions } from "./shell.js";
 import type {
   AgentOptions,
@@ -52,7 +52,6 @@ import type {
   CallOptions,
   HumanInputOptions,
   HumanInputResult,
-  JsonValue,
   NetworkEntry,
   PhaseOptions,
   ScheduleOptions,
@@ -106,12 +105,6 @@ export interface HostInterface {
   idToken(audience: string): Promise<string>;
   apiToken(): Promise<string>;
   usage(): Promise<UsageSnapshot>;
-}
-
-// A capability payload is serialized to JSON on the wire; anything non-JSON is dropped by
-// JSON.stringify exactly as it always was at this boundary. The cast is confined here.
-function asJsonValue(value: unknown): JsonValue {
-  return (value === undefined ? null : value) as JsonValue;
 }
 
 function reasonText(reason: unknown): string {
@@ -206,7 +199,7 @@ export class HostClient implements HostInterface {
 
   /** The loader reports `run`'s return; the host validates + persists it. `void` ⇒ `null`. */
   async reportReturn(value: unknown): Promise<void> {
-    await this.request("report_return", { value: asJsonValue(value) });
+    await this.request("report_return", { value: encodeCanonical(value) });
   }
 
   private buildContext(data: ContextData): Context {
@@ -242,7 +235,7 @@ export class HostClient implements HostInterface {
   ): Promise<WorkflowCallResult> {
     const result = await this.request("workflows.call", {
       slug,
-      input: asJsonValue(input),
+      input: encodeCanonical(input),
       opts: toWireCallOptions(opts),
     });
     return { output: result.output, outputSchema: result.output_schema };
@@ -251,7 +244,7 @@ export class HostClient implements HostInterface {
   async runWorkflow(slug: string, input: unknown, opts: CallOptions | undefined): Promise<string> {
     const { runId } = await this.request("workflows.run", {
       slug,
-      input: asJsonValue(input),
+      input: encodeCanonical(input),
       opts: toWireCallOptions(opts),
     });
     return runId;
@@ -260,7 +253,7 @@ export class HostClient implements HostInterface {
   async scheduleWorkflow(slug: string, input: unknown, opts: ScheduleOptions): Promise<string> {
     const { scheduleId } = await this.request("workflows.schedule", {
       slug,
-      input: asJsonValue(input),
+      input: encodeCanonical(input),
       opts: {
         ...(opts.cron !== undefined ? { cron: opts.cron } : {}),
         ...(opts.rate !== undefined ? { rate: opts.rate } : {}),
@@ -539,7 +532,7 @@ export class HostClient implements HostInterface {
     void (async () => {
       try {
         const output = await def.execute(input);
-        this.sendFrame({ jsonrpc: "2.0", id, result: { output: asJsonValue(output) } });
+        this.sendFrame({ jsonrpc: "2.0", id, result: { output: encodeCanonical(output) } });
       } catch (err: unknown) {
         this.respondError(id, "TOOL_ERROR", reasonText(err));
       }

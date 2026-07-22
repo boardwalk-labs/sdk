@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 
 import { describe, expect, it } from "vitest";
-import { reviveBySchema } from "./revive.js";
+import { encodeCanonical, reviveBySchema } from "./revive.js";
 
 describe("reviveBySchema — the rich-type golden set", () => {
   it("revives an ISO date-time string to a Date", () => {
@@ -161,5 +161,63 @@ describe("reviveBySchema — passthrough (untyped / best-effort)", () => {
 
   it("does not treat an ordinary pattern as the bigint encoding", () => {
     expect(reviveBySchema("123", { type: "string", pattern: "^[0-9]+$" })).toBe("123");
+  });
+});
+
+describe("encodeCanonical (the encode pass — revival's inverse)", () => {
+  it("encodes the canonical rich types", () => {
+    expect(
+      encodeCanonical({
+        at: new Date("2026-07-22T00:00:00.000Z"),
+        big: 123456789012345678901234567890n,
+        bytes: new Uint8Array([104, 105]),
+        tags: new Set(["a", "b"]),
+      }),
+    ).toEqual({
+      at: "2026-07-22T00:00:00.000Z",
+      big: "123456789012345678901234567890",
+      bytes: "aGk=",
+      tags: ["a", "b"],
+    });
+  });
+
+  it("round-trips with reviveBySchema through the wire encoding", () => {
+    const schema = {
+      type: "object",
+      properties: {
+        at: { type: "string", format: "date-time" },
+        big: { type: "string", pattern: "^-?\\d+$" },
+        bytes: { type: "string", contentEncoding: "base64" },
+        tags: { type: "array", items: { type: "string" }, uniqueItems: true },
+      },
+    };
+    const original = {
+      at: new Date("2026-07-22T12:34:56.000Z"),
+      big: 42n,
+      bytes: new Uint8Array([1, 2, 3]),
+      tags: new Set(["x", "y"]),
+    };
+    expect(reviveBySchema(encodeCanonical(original), schema)).toEqual(original);
+  });
+
+  it("drops non-JSON scalars and non-data values instead of crashing", () => {
+    expect(
+      encodeCanonical({
+        nan: Number.NaN,
+        inf: Number.POSITIVE_INFINITY,
+        fn: () => 1,
+        missing: undefined,
+        list: [Number.NaN, () => 1, 2],
+      }),
+    ).toEqual({ nan: null, inf: null, list: [null, null, 2] });
+    expect(encodeCanonical(undefined)).toBeNull();
+    expect(encodeCanonical(new Date(Number.NaN))).toBeNull();
+  });
+
+  it("honors toJSON (JSON.stringify parity) and nests recursively", () => {
+    const custom = { toJSON: () => ({ kind: "custom", when: new Date(0) }) };
+    expect(encodeCanonical({ inner: custom })).toEqual({
+      inner: { kind: "custom", when: "1970-01-01T00:00:00.000Z" },
+    });
   });
 });
