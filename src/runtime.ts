@@ -83,7 +83,7 @@ export {
   type Context,
 } from "./protocol.js";
 
-export type { McpServerRef } from "./meta.js";
+export type { McpServerRef } from "./types.js";
 export type {
   AgentOptions,
   AgentAttachment,

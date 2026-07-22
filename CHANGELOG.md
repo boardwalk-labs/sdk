@@ -6,6 +6,48 @@ patch releases.
 
 ## Unreleased
 
+### Changed (breaking — the descriptor replaces the meta literal)
+
+The workflow-format redesign's schema half (P4). Deployment policy is now a hand-written
+`workflow.jsonc` (or strict-JSON `workflow.json`) descriptor the control plane reads as data —
+the pure-literal `meta` export and its static extraction are deleted wholesale (an approved
+clean break; published consumers pin old versions).
+
+- **New: `descriptor.ts`** (exported from the package root):
+  - `parseJsonc(text)` — hand-rolled JSONC parsing (no new dependency): strips `//` and
+    `/* */` comments and trailing commas without touching string contents (escape-aware),
+    then `JSON.parse`. Comments are author-facing only — stripped on parse, never stored.
+  - `parseWorkflowDescriptor(text)` — JSONC parse → validation against
+    `workflowManifestSchema` minus the build-derived `input_schema` / `output_schema` (a
+    descriptor supplying either is an ERROR with a targeted message — those derive from
+    `run`'s signature) → the concurrency-key template syntax check. Returns the typed
+    `WorkflowDescriptor`; throws `DescriptorValidationError` listing every issue with its
+    path.
+  - `validateConcurrencyKeyTemplate(template)` — the deploy-time SYNTAX check for
+    `concurrency.key`: well-formed `${…}` interpolations, each path a restricted accessor
+    rooted at `input` (dotted fields + `[index]` only — no function calls, operators, or
+    arbitrary expressions). Returns structured `ConcurrencyKeyTemplateIssue[]`. VALUE
+    resolution happens at run creation on the control plane, not in this SDK.
+- **Changed: the manifest schema (`workflowManifestSchema`).**
+  - `budget.deadline_seconds` is **deleted** (no wall-clock cap; every budget dimension is
+    metered and pausable).
+  - `budget.max_duration_seconds` is **renamed `max_compute_seconds`** (still active-compute
+    only; no alias).
+  - `concurrency` is now `{ mode: "unlimited" }` (default) | `{ mode: "serial", key?: string }`
+    — `serial` with `key` is one run per resolved key, subsuming the deleted `serial_by_key`
+    variant. `key` is a runtime-interpolated template over the input.
+  - **New optional fields:** `entry` (the package-relative file exporting `run`; omitted ⇒
+    the language default `src/index.ts` / `main.py`, resolved at deploy) and `files` (the
+    non-code asset allowlist — relative globs; `skills/**` + `README.md` ride by convention).
+- **Removed: the meta-literal surface.** `src/meta.ts` and `src/extract.ts` are deleted:
+  the `WorkflowMeta` type, `validateMeta`, `MetaValidationError`, and the
+  `@boardwalk-labs/workflow/extract` subpath (`extractMetaLiteral` / `extractManifest` /
+  `MetaExtractionError`) are gone. Manifest component types (`Trigger`, `Budget`,
+  `Concurrency`, `RunsOn`, …) are now derived from the Zod schema and re-exported from the
+  root; `McpServerRef` (a per-agent option, not a manifest type) moved to `types.ts`
+  unchanged. `typescript` is no longer a runtime dependency (it powered only the deleted
+  AST extractor).
+
 ### Changed (breaking — the function model: `run(input, context)` + the host protocol)
 
 The workflow-format redesign lands its SDK half (P0 + P2; an approved clean break — published
@@ -51,10 +93,10 @@ run metadata is param 1.
   (ids live on `context`; the mints are `auth.*`), the `WorkflowHost`/`RuntimeContext` seam
   (`installHost`, `installInput`, `installConfig`, `takeDeclaredOutput`, `resetRuntime`,
   `requireHost`, and the internal `recordOutput` path — `src/host.ts` is deleted).
-- **Unchanged:** the manifest module (`workflowManifestSchema`, `validateMeta`,
-  `WorkflowMeta`; descriptor changes are a later phase), the `/extract` subpath, the
-  run-event wire format exports, `normalizeReasoning`, `parallel()` semantics, and the
-  `agent()` author surface (`AgentOptions` incl. `ToolDef`).
+- **Unchanged:** the run-event wire format exports, `normalizeReasoning`, `parallel()`
+  semantics, and the `agent()` author surface (`AgentOptions` incl. `ToolDef`). (The
+  manifest module and the `/extract` subpath, unchanged by this entry, are reshaped by the
+  descriptor entry above — both land in the same release.)
 
 ## 0.2.5
 

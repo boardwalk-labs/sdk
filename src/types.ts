@@ -2,10 +2,34 @@
 
 // Option/argument types for the workflow hooks (phase, agent, workflows.call, sleep, secrets).
 
-import type { McpServerRef } from "./meta.js";
-
 /** A JSON Schema object (loosely typed — the engine validates against it). */
 export type JsonSchema = Record<string, unknown>;
+
+/**
+ * An MCP server an `agent()` call connects to (inline in {@link AgentOptions}.mcp — per-agent,
+ * no descriptor declaration). The program is the trusted layer: put credentials in
+ * `env`/`headers` directly (e.g. from `secrets.get`) — no interpolation syntax.
+ */
+export type McpServerRef =
+  | {
+      name: string;
+      transport: "stdio";
+      command: string;
+      args?: readonly string[];
+      env?: Record<string, string>;
+      /** Tool names to hide from the agent (they stay callable by the trusted program). Use to keep
+       *  a server's sharp tools — e.g. arbitrary code execution — out of the model's reach. */
+      excludeTools?: readonly string[];
+    }
+  | {
+      name: string;
+      transport: "http";
+      url: string;
+      headers?: Record<string, string>;
+      /** Tool names to hide from the agent (they stay callable by the trusted program). Use to keep
+       *  a server's sharp tools — e.g. arbitrary code execution — out of the model's reach. */
+      excludeTools?: readonly string[];
+    };
 
 /** Any JSON value — the shape of the run's `config`, `output(...)`, and event payloads. */
 export type JsonValue =

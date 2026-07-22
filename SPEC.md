@@ -10,7 +10,7 @@
 
 1. **Capabilities (imports)** — `agent()`, `workflows.*`, `sleep()`, `humanInput()`, `secrets.get()`, `artifacts.write()`, `computer.openBrowser()`, `shell()`, `parallel()`, `phase()`, `auth.{idToken,apiToken}`, `usage.get()` — plus the `Context` type for `run`'s second parameter and `installTestHost()` for unit tests.
 2. **The program↔host protocol** — JSON-RPC 2.0 over a local socket (`src/protocol.ts`), one method per capability, spoken by every SDK (TS here; Python is a sibling client of the same contract) against the runner's host server. The TS client is `src/host_client.ts`.
-3. **The manifest schema** — the Zod schema every engine and hosted Boardwalk validate against; TS types derived from the schema, never hand-written.
+3. **The manifest schema + the descriptor** — the Zod schema every engine and hosted Boardwalk validate against (TS types derived from the schema, never hand-written), plus parsing/validation for the hand-written `workflow.jsonc` descriptor (JSONC parse, the manifest schema minus the build-derived I/O schemas, and the deploy-time concurrency-key template syntax check).
 4. **The run-event wire format** — the typed event stream every engine emits.
 
 The SDK has **zero engine knowledge**: no scheduling, no process management, no storage, no HTTP. It is a thin, typed marshaling layer from author code to whatever engine is hosting the run; the only I/O in the package is the protocol client's local socket.
@@ -108,7 +108,7 @@ const usage: {
 
 ### 2.1.1 The `agent()` capability set (v1 — required, all engines)
 
-The loop is a real agentic loop, not bare inference. **The engine's built-in coding tools are ON BY DEFAULT** (`read`, `write`, `edit`, `ls`, `grep`, `glob`, `bash`, `apply_patch`, `webfetch`, `web_search`, `artifacts`, `lsp`): a plain `agent(prompt)` can already read, edit, and run commands in the run's workspace, and `builtins` scopes that set. **Everything else is PER-AGENT (decided 2026-06-11): each `agent()` call brings its own inline tools, MCP servers, skills, and memory — the manifest declares NONE of them** (no `meta.tools`/`meta.mcp`/`meta.skills`; memory needs no `workspace.persist` declaration).
+The loop is a real agentic loop, not bare inference. **The engine's built-in coding tools are ON BY DEFAULT** (`read`, `write`, `edit`, `ls`, `grep`, `glob`, `bash`, `apply_patch`, `webfetch`, `web_search`, `artifacts`, `lsp`): a plain `agent(prompt)` can already read, edit, and run commands in the run's workspace, and `builtins` scopes that set. **Everything else is PER-AGENT (decided 2026-06-11): each `agent()` call brings its own inline tools, MCP servers, skills, and memory — the descriptor declares NONE of them** (no `tools`/`mcp`/`skills` fields; memory needs no `workspace.persist` declaration).
 
 ```ts
 // built-ins are default-on; everything else is per-agent, on AgentOptions:
@@ -159,9 +159,13 @@ interface Context {
 }
 ```
 
-### 2.2 `meta` / manifest — v1 core fields
+### 2.2 The descriptor (`workflow.jsonc`) / manifest — v1 core fields
 
-The manifest field table: `slug` (the workflow's URL-safe identity — alphanumeric + hyphens; referenced by the CLI, `workflows.call`, and the API), `title` (optional human display label, free text one line; UIs fall back to a title-cased slug), `description`, `triggers` (cron `{expr, timezone?, input?}` — `input` pins a static payload for every scheduled run, matched against `input_schema` when declared; omitted ⇒ no input / manual / webhook `{auth}`), `env` (with `${{ secrets.NAME }}` whole-value interpolation; `BOARDWALK_*` / `AWS_*` reserved), `input_schema`, `output_schema`, `workspace.persist` (`true | string[]` — program-level persistence; agent memory is auto-persisted separately, §2.1.1), `budget` (`max_usd` / `max_tokens` / `max_duration_seconds`), `concurrency`, `runs_on`. The **secret allowlist is `permissions.secrets`** (`{name}[]` — a readable secret is an access grant), not a top-level field. There are **no capability manifest fields** (`tools` / `mcp` / `skills`) — all agent capabilities are per-agent (§2.1.1).
+A workflow's deployment policy lives in a small, hand-written declarative descriptor — `workflow.jsonc` (JSON + comments + trailing commas) or strict-JSON `workflow.json` — that the control plane reads as **data**, never by executing the program. Comments are author-facing only: stripped on parse, never stored. The **stored manifest** is the descriptor plus the build-derived `input_schema` / `output_schema` (derived from `run`'s signature — a descriptor supplying either is a validation **error**, never a merge).
+
+The descriptor field table: `slug` (the workflow's URL-safe identity — alphanumeric + hyphens; referenced by the CLI, `workflows.call`, and the API), `title` (optional human display label, free text one line; UIs fall back to a title-cased slug), `description`, `entry` (the package-relative file exporting `run`; omitted ⇒ the language default, `src/index.ts` / `main.py`, resolved at deploy — never defaulted in-schema), `triggers` (cron `{expr, timezone?, input?}` — `input` pins a static payload for every scheduled run, matched against `input_schema` when declared; omitted ⇒ no input / manual / webhook `{auth}` / `workflow_run`), `env` (with `${{ secrets.NAME }}` whole-value interpolation), `workspace.persist` (`true | string[]` — program-level persistence; agent memory is auto-persisted separately, §2.1.1), `budget` (`max_usd` / `max_tokens` / `max_compute_seconds` — active compute only; every dimension is metered and pausable; there is **no `deadline_seconds`**), `concurrency`, `runs_on`, `files` (the non-code asset **allowlist** — relative globs; `skills/**` and `README.md` ride by convention). The **secret allowlist is `permissions.secrets`** (`{name}[]` — a readable secret is an access grant), not a top-level field. There are **no capability manifest fields** (`tools` / `mcp` / `skills`) — all agent capabilities are per-agent (§2.1.1).
+
+**Concurrency:** `{ mode: "unlimited" }` (default) or `{ mode: "serial", key?: string }` — `serial` with no `key` is one run globally; with `key` it is one run per resolved key (this subsumes the old `serial_by_key`). `key` is a **runtime-interpolated template** over the input: literal text plus `${<path>}` interpolations, each path a restricted accessor **rooted at `input`** — dotted fields + `[index]` only (`input.customerId`, `input.items[0].sku`); no function calls, operators, or arbitrary expressions. The SDK ships the deploy-time **syntax** check (`validateConcurrencyKeyTemplate`, applied by `parseWorkflowDescriptor`); **value resolution happens at run creation on the control plane**, never in this SDK.
 
 **Platform-extension fields** (in the schema, enforced only on hosted Boardwalk, documented as such): `permissions`, `egress`, `callable_by`, `notifications`, `container`. `permissions` is the access-grant surface — access-level knobs (`id_token` / `artifacts` / `contents`) plus the secret allowlist (`secrets: {name}[]`); it carries **no `tools` grant** (tool selection is per-agent, §2.1.1). Engines without the capability fail validation loudly when a workflow requires it (capability-presence rule).
 
@@ -172,7 +176,7 @@ The manifest field table: `slug` (the workflow's URL-safe identity — alphanume
 - One Zod schema, exported; TS types derived via `z.infer`. No hand-written manifest types.
 - Unknown fields are **validation errors**.
 - Any union members ordered **most-specific-first** (Zod unions are first-match-wins and objects strip unknown keys — a less-specific variant listed first silently drops fields). Round-trip tests assert with `toEqual`, never just `toBeDefined`.
-- `meta` must be a **pure literal**; the SDK ships the static extractor (`extractMetaLiteral` / `extractManifest` on the `@boardwalk-labs/workflow/extract` subpath) the CLI and engines use to derive the manifest from a program file without executing it.
+- The descriptor surface (`descriptor.ts`, exported from the package root): `parseJsonc(text)` (hand-rolled, string-aware comment + trailing-comma stripping — no new dependency; stripped characters become spaces so `JSON.parse` error positions still point at the original text), `parseWorkflowDescriptor(text)` (JSONC parse → the manifest schema minus the derived I/O schemas → the concurrency-key syntax check; throws `DescriptorValidationError` listing every issue with its path), and `validateConcurrencyKeyTemplate(template)` (returns structured `ConcurrencyKeyTemplateIssue[]`; empty = valid). The old meta-literal surface (`WorkflowMeta`, `validateMeta`, `MetaValidationError`, the `/extract` subpath) is **deleted** — the descriptor replaces the meta literal wholesale.
 
 ### 2.4 The program↔host protocol (the engine seam)
 
@@ -204,8 +208,7 @@ Exported types + Zod schemas for the full event union: envelope (`runId`, `turnI
 ```
 src/
   index.ts        — the author-facing capability imports + public exports
-  types.ts        — option/argument types (AgentOptions, ToolDef, SleepArg, …)
-  meta.ts         — WorkflowMeta + trigger/capability/platform-extension types
+  types.ts        — option/argument types (AgentOptions, ToolDef, McpServerRef, SleepArg, …)
   protocol.ts     — the program↔host JSON-RPC contract: frame + per-method zod schemas,
                     Context/actor/trigger data schemas, HostError, isRunFatal
   host_client.ts  — the protocol client (BOARDWALK_HOST_SOCK), the active-host singleton,
@@ -213,18 +216,19 @@ src/
   revive.ts       — the schema-guided revival pass (ISO→Date, base64→Uint8Array, …)
   shell.ts        — shell() + ShellOptions/ShellResult
   runtime.ts      — the engine/loader-facing subpath export (/runtime)
-  manifest.ts     — the Zod schema, validateMeta, MetaValidationError
+  manifest.ts     — the Zod schema + derived component types
+  descriptor.ts   — workflow.jsonc parsing/validation (parseJsonc, parseWorkflowDescriptor,
+                    validateConcurrencyKeyTemplate, DescriptorValidationError)
   events.ts       — wire-format schemas + channels + cursor helpers
-  extract.ts      — pure-literal AST extraction (the /extract subpath export)
 ```
 
-- **Dependencies:** `zod` (schemas) and `typescript` (the `/extract` AST parser — engines and the CLI need extraction; authors already have TypeScript to author with). Every additional dependency needs PR justification.
+- **Dependencies:** `zod` (schemas). `typescript` is dev-only (the build). Every additional dependency needs PR justification — the JSONC parser is deliberately hand-rolled.
 - The only I/O in this package is the protocol client's local socket (`node:net`). Everything else goes through the host.
 
 ## 4. Testing
 
-- Manifest schema: exhaustive valid/invalid fixtures; round-trip (`parse` → `toEqual`) for every union member; unknown-field rejection; env interpolation + reserved-prefix cases; cron expr edge cases.
-- Extraction: pure-literal enforcement (rejects spreads, calls, shorthand, computed keys, template interpolation, array holes) with precise `file:line:col` error positions; `satisfies`/`as const` unwrapping.
+- Manifest schema: exhaustive valid/invalid fixtures; round-trip (`parse` → `toEqual`) for every union member; unknown-field rejection (incl. the deleted `deadline_seconds` / `max_duration_seconds` / `serial_by_key`); env interpolation cases; cron expr edge cases; `entry` / `files` path safety.
+- Descriptor: JSONC edge cases (comments inside strings survive, escaped quotes, trailing commas in objects + arrays, CRLF, unterminated block comment); the `input_schema`/`output_schema` build-derived rejection; issue-collecting error messages; concurrency-key template syntax (valid nested dots + `[index]`; invalid: not rooted at `input`, function calls, operators, unclosed `${`, empty path).
 - Protocol: schema round-trips (`toEqual`) for every method's params/result and every frame/actor variant; string-code error shape; `isRunFatal` semantics.
 - Client ↔ host: a fake host server over a REAL socket covers concurrent request multiplexing, `tool_invoke` dispatch (declaration-only tools, concurrent invocations, handler throw → error response, unknown/abandoned call → error), `cancel` → signal abort, `bootstrap`/`report_return`, late-response discard, and the facades end-to-end (incl. `workflows.call` revival).
 - Revival: golden tests per rich type (`Date`/`bigint`/`Uint8Array`/`Set`), nested structures, `$defs` recursion, and null-schema passthrough; mismatches never throw.

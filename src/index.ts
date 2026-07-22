@@ -320,34 +320,8 @@ export {
 export { installTestHost, type TestHostHandle, type TestHostOverrides } from "./host_client.js";
 
 export type {
-  WorkflowMeta,
-  Trigger,
-  CronTrigger,
-  WebhookTrigger,
-  ManualTrigger,
-  WorkflowRunTrigger,
-  McpServerRef,
-  Concurrency,
-  CallableBy,
-  OrgRole,
-  RunsOn,
-  HostedRunsOn,
-  HostedRunsOnObject,
-  HostedRunnerSize,
-  SelfHostedRunsOn,
-  Container,
-  SecretRef,
-  EnvVars,
-  EgressPolicy,
-  RunPermissions,
-  RunPermissionAccess,
-  Budget,
-  Notification,
-  Workspace,
-} from "./meta.js";
-
-export type {
   AgentOptions,
+  McpServerRef,
   AgentAttachment,
   ReasoningEffort,
   ReasoningOptions,
@@ -379,10 +353,42 @@ export { normalizeReasoning, type NormalizedReasoning } from "./reasoning.js";
 
 export {
   workflowManifestSchema,
-  validateMeta,
-  MetaValidationError,
   type WorkflowManifest,
+  type Trigger,
+  type CronTrigger,
+  type WebhookTrigger,
+  type ManualTrigger,
+  type WorkflowRunTrigger,
+  type Concurrency,
+  type CallableBy,
+  type OrgRole,
+  type RunsOn,
+  type HostedRunsOn,
+  type HostedRunsOnObject,
+  type HostedRunnerSize,
+  type SelfHostedRunsOn,
+  type Container,
+  type SecretRef,
+  type EnvVars,
+  type EgressPolicy,
+  type RunPermissions,
+  type RunPermissionAccess,
+  type Budget,
+  type Notification,
+  type Workspace,
 } from "./manifest.js";
+
+// The hand-written `workflow.jsonc` descriptor: JSONC parsing (comments stripped, never
+// stored), validation against the manifest schema minus the build-derived I/O schemas, and
+// the deploy-time concurrency-key template SYNTAX check.
+export {
+  parseJsonc,
+  parseWorkflowDescriptor,
+  validateConcurrencyKeyTemplate,
+  DescriptorValidationError,
+  type WorkflowDescriptor,
+  type ConcurrencyKeyTemplateIssue,
+} from "./descriptor.js";
 
 export {
   type RunEvent,

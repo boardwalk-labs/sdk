@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: MIT
 
-// workflowManifestSchema — the validator of record for a workflow's `meta`.
+// workflowManifestSchema — the validator of record for a workflow's manifest.
 //
 // One Zod schema, consumed by every engine (local `dev`, the self-hosted server, Boardwalk
-// hosted platform) and by `extract.ts` after pure-literal extraction. The TS manifest type is derived
-// from the schema, never hand-written. Unknown fields are validation errors — no silent drift.
+// hosted platform) and by `descriptor.ts` after JSONC parsing. The stored manifest is the
+// hand-written descriptor (`workflow.jsonc`) plus the build-derived `input_schema` /
+// `output_schema`. TS types are derived from the schema, never hand-written. Unknown fields
+// are validation errors — no silent drift.
 //
 // Union ordering rule: most-specific-first. Zod unions are first-match-wins and strict objects
 // reject extras, but keep the discipline anyway — a less-specific variant listed first can
@@ -131,17 +133,23 @@ const envVarsSchema = z
 // Workspace (program-level persistent directories; agent memory is separate + auto-persisted)
 // ============================================================================
 
+/** A relative, forward-slash path with no escapes: rejects absolute paths, backslashes,
+ *  `..` and `.` segments. Shared by `workspace.persist`, `entry`, and `files` globs (a glob's
+ *  `*` / `**` segments are ordinary segments here — only escapes are rejected). */
+const relativePath = (label: string) =>
+  z
+    .string()
+    .min(1)
+    .max(512)
+    .refine((p) => !p.startsWith("/") && !p.includes("\\"), {
+      message: `${label} must be relative (no leading / or backslashes)`,
+    })
+    .refine((p) => p.split("/").every((seg) => seg !== "" && seg !== "." && seg !== ".."), {
+      message: `${label} must not contain \`..\`, \`.\` or empty segments`,
+    });
+
 /** Workspace-relative, no escapes: rejects absolute paths, backslashes, `..` and `.` segments. */
-const persistPath = z
-  .string()
-  .min(1)
-  .max(512)
-  .refine((p) => !p.startsWith("/") && !p.includes("\\"), {
-    message: "persist paths must be workspace-relative (no leading / or backslashes)",
-  })
-  .refine((p) => p.split("/").every((seg) => seg !== "" && seg !== "." && seg !== ".."), {
-    message: "persist paths must not contain `..`, `.` or empty segments",
-  });
+const persistPath = relativePath("persist paths");
 
 const workspaceSchema = z.strictObject({
   persist: z.union([z.boolean(), z.array(persistPath).min(1).max(50)]).optional(),
@@ -151,23 +159,24 @@ const workspaceSchema = z.strictObject({
 // Budget and concurrency
 // ============================================================================
 
+// Every budget dimension is metered and PAUSABLE: a breach parks the run for approve-resume,
+// never a hard kill. There is deliberately NO `deadline_seconds` wall-clock cap.
 const budgetSchema = z.strictObject({
   max_tokens: z.number().int().positive().optional(),
   max_usd: z.number().positive().finite().optional(),
   // ACTIVE COMPUTE time — only on-CPU execution counts; a run parked in a long sleep, a
   // human-input gate, or a child-wait does NOT burn this (a run intentionally suspended for a day
   // must not blow its compute budget on resume). This is the runaway / cost cap.
-  max_duration_seconds: z.number().int().positive().optional(),
-  // WALL-CLOCK time from the run's start, INCLUDING suspended idle — the staleness / SLA cap:
-  // "give up if this run hasn't finished within N real-world seconds, even if it has just been
-  // waiting." Orthogonal to max_duration_seconds (e.g. an approval that legitimately waits hours
-  // but is pointless after a day: a small max_duration_seconds + a large deadline_seconds).
-  deadline_seconds: z.number().int().positive().optional(),
+  max_compute_seconds: z.number().int().positive().optional(),
 });
 
+// `serial` with no `key` = one run globally; with `key` = one run per resolved key (subsumes the
+// old `serial_by_key`). `key` is a RUNTIME-INTERPOLATED template over the input — `${input.<path>}`
+// interpolations, each path a restricted accessor rooted at `input` (dotted fields + [index] only).
+// The template SYNTAX is checked at deploy (`validateConcurrencyKeyTemplate`, descriptor.ts);
+// value resolution happens at run creation on the control plane, never here.
 const concurrencySchema = z.union([
-  z.strictObject({ mode: z.literal("serial_by_key"), key: z.string().min(1).max(200) }),
-  z.strictObject({ mode: z.literal("serial") }),
+  z.strictObject({ mode: z.literal("serial"), key: z.string().min(1).max(200).optional() }),
   z.strictObject({ mode: z.literal("unlimited") }),
 ]);
 
@@ -181,19 +190,21 @@ const hostedRunsOnLabel = z.enum([
   "boardwalk/linux-python",
 ]);
 
-const runsOnSchema = z.union([
-  z.strictObject({
-    kind: z.literal("self-hosted"),
-    /** Pool name; omitted ⇒ `"default"` — the pool `boardwalk runner start` creates. */
-    pool: z.string().min(1).max(120).default("default"),
-    labels: z.array(z.string().min(1).max(120)).optional(),
-  }),
-  z.strictObject({
-    label: hostedRunsOnLabel,
-    size: z.enum(["small", "medium", "large", "xlarge"]).optional(),
-  }),
-  hostedRunsOnLabel,
-]);
+const hostedRunnerSize = z.enum(["small", "medium", "large", "xlarge"]);
+
+const selfHostedRunsOnSchema = z.strictObject({
+  kind: z.literal("self-hosted"),
+  /** Pool name; omitted ⇒ `"default"` — the pool `boardwalk runner start` creates. */
+  pool: z.string().min(1).max(120).default("default"),
+  labels: z.array(z.string().min(1).max(120)).optional(),
+});
+
+const hostedRunsOnObjectSchema = z.strictObject({
+  label: hostedRunsOnLabel,
+  size: hostedRunnerSize.optional(),
+});
+
+const runsOnSchema = z.union([selfHostedRunsOnSchema, hostedRunsOnObjectSchema, hostedRunsOnLabel]);
 
 // ============================================================================
 // Platform-extension fields (validated everywhere, enforced where the capability exists)
@@ -215,8 +226,10 @@ const permissionsSchema = z.strictObject({
   secrets: z.array(secretRefSchema).optional(),
 });
 
+const orgRole = z.enum(["owner", "admin", "member", "viewer"]);
+
 const callableBySchema = z.union([
-  z.strictObject({ roles: z.array(z.enum(["owner", "admin", "member", "viewer"])).min(1) }),
+  z.strictObject({ roles: z.array(orgRole).min(1) }),
   z.strictObject({ workflows: z.array(workflowSlug).min(1) }),
   z.enum(["anyone_in_org", "users_only", "workflows_only"]),
 ]);
@@ -251,6 +264,10 @@ export const workflowManifestSchema = z.strictObject({
   slug: workflowSlug,
   title: workflowTitle.optional(),
   description: z.string().max(1000).optional(),
+  // The package-relative file exporting `run`. Omitted ⇒ the language default — `src/index.ts`
+  // for TypeScript, `main.py` for Python. Deliberately NOT defaulted in-schema: the default is
+  // per-language, and the deploy surface resolves it against the uploaded package.
+  entry: relativePath("entry").optional(),
   triggers: z.array(triggerSchema).min(1),
   // NO top-level `secrets` — the secret allowlist is `permissions.secrets` (a secret you may read
   // is an access grant). `env` is for value injection (incl. `${{ secrets.NAME }}` of a permitted secret).
@@ -273,30 +290,39 @@ export const workflowManifestSchema = z.strictObject({
   callable_by: callableBySchema.default("anyone_in_org"),
   egress: egressSchema.optional(),
   notifications: z.array(notificationSchema).optional(),
+  // The non-code asset ALLOWLIST: glob patterns (relative, forward-slash) naming files the
+  // package ships beyond what the entry imports (prompt templates, fixtures, data files).
+  // `skills/**` and `README.md` ride by convention without being listed; `node_modules`,
+  // `.git`, `.env*`, and dotfiles are never packaged regardless of any glob.
+  files: z.array(relativePath("files globs")).min(1).max(100).optional(),
 });
 
 /** The fully-defaulted, validated manifest — the contract every engine consumes. */
 export type WorkflowManifest = z.infer<typeof workflowManifestSchema>;
 
-/**
- * Validate an already-extracted `meta` object (e.g. from `extract.ts` or a test fixture) and
- * return the manifest, or throw a `MetaValidationError` listing every issue with its path.
- */
-export function validateMeta(meta: unknown): WorkflowManifest {
-  const result = workflowManifestSchema.safeParse(meta);
-  if (!result.success) {
-    const issues = result.error.issues
-      .map((i) => `  ${i.path.length > 0 ? i.path.join(".") : "(root)"}: ${i.message}`)
-      .join("\n");
-    throw new MetaValidationError(`Workflow \`meta\` failed manifest validation:\n${issues}`);
-  }
-  return result.data;
-}
+// ============================================================================
+// Derived component types (from the schema, never hand-written)
+// ============================================================================
 
-/** Thrown by {@link validateMeta} when a `meta` object violates the manifest schema. */
-export class MetaValidationError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "MetaValidationError";
-  }
-}
+export type Trigger = z.infer<typeof triggerSchema>;
+export type CronTrigger = z.infer<typeof cronTriggerSchema>;
+export type WebhookTrigger = z.infer<typeof webhookTriggerSchema>;
+export type ManualTrigger = z.infer<typeof manualTriggerSchema>;
+export type WorkflowRunTrigger = z.infer<typeof workflowRunTriggerSchema>;
+export type Concurrency = z.infer<typeof concurrencySchema>;
+export type Budget = z.infer<typeof budgetSchema>;
+export type Workspace = z.infer<typeof workspaceSchema>;
+export type EnvVars = z.infer<typeof envVarsSchema>;
+export type SecretRef = z.infer<typeof secretRefSchema>;
+export type RunPermissions = z.infer<typeof permissionsSchema>;
+export type RunPermissionAccess = z.infer<typeof permissionAccess>;
+export type OrgRole = z.infer<typeof orgRole>;
+export type CallableBy = z.infer<typeof callableBySchema>;
+export type RunsOn = z.infer<typeof runsOnSchema>;
+export type HostedRunsOn = z.infer<typeof hostedRunsOnLabel>;
+export type HostedRunnerSize = z.infer<typeof hostedRunnerSize>;
+export type HostedRunsOnObject = z.infer<typeof hostedRunsOnObjectSchema>;
+export type SelfHostedRunsOn = z.infer<typeof selfHostedRunsOnSchema>;
+export type Container = z.infer<typeof containerSchema>;
+export type EgressPolicy = z.infer<typeof egressSchema>;
+export type Notification = z.infer<typeof notificationSchema>;

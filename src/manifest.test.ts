@@ -1,47 +1,16 @@
 // SPDX-License-Identifier: MIT
 
 import { describe, expect, it } from "vitest";
-import {
-  MetaValidationError,
-  validateMeta,
-  workflowManifestSchema,
-  type WorkflowManifest,
-} from "./manifest.js";
-import type { WorkflowMeta } from "./meta.js";
-
-// Compile-time contract guard (the contract guard): the author-facing `WorkflowMeta`
-// (meta.ts) is hand-written for readable JSDoc, NOT derived from the schema, so the two can drift.
-// A `toEqualTypeOf` is impossible (the meta type uses `readonly` arrays; the schema yields mutable
-// ones), but their FIELD SET must stay identical — a field added to one and not the other is the
-// silent-drift failure mode. This fails `tsc` (so `pnpm typecheck` + CI) the moment the key sets
-// diverge; per-field shapes stay covered by the runtime round-trips below.
-type TypeEquals<A, B> =
-  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
-type Expect<T extends true> = T;
+import { workflowManifestSchema } from "./manifest.js";
 
 const MINIMAL = { slug: "hello", triggers: [{ kind: "manual" }] };
 
+/** Parse via the schema (throws ZodError). Descriptor-level message formatting is descriptor.test.ts. */
+const parse = (value: unknown) => workflowManifestSchema.parse(value);
+
 describe("workflowManifestSchema — core", () => {
-  it("WorkflowMeta and the manifest schema declare the same field set", () => {
-    // The type annotation fails `tsc` if the key sets diverge (the real guard); the runtime assert
-    // keeps the typed binding referenced so it isn't flagged unused.
-    const keysMatch: Expect<TypeEquals<keyof WorkflowMeta, keyof WorkflowManifest>> = true;
-    expect(keysMatch).toBe(true);
-
-    // The top-level guard above only compares the outermost key set, so a field added to a NESTED
-    // object on one side and not the other still drifts silently (this is how `budget.deadline_seconds`
-    // landed in the schema but not the interface). Guard the nested objects that are plain records.
-    const budgetKeysMatch: Expect<
-      TypeEquals<
-        keyof NonNullable<WorkflowMeta["budget"]>,
-        keyof NonNullable<WorkflowManifest["budget"]>
-      >
-    > = true;
-    expect(budgetKeysMatch).toBe(true);
-  });
-
   it("accepts a minimal manifest and applies defaults", () => {
-    const m = validateMeta(MINIMAL);
+    const m = parse(MINIMAL);
     expect(m.slug).toBe("hello");
     expect(m.title).toBeUndefined();
     expect(m.triggers).toEqual([{ kind: "manual" }]);
@@ -50,11 +19,12 @@ describe("workflowManifestSchema — core", () => {
     expect(m.callable_by).toBe("anyone_in_org");
   });
 
-  it("round-trips a full manifest (slug + title) without stripping fields", () => {
+  it("round-trips a full manifest without stripping fields", () => {
     const full = {
       slug: "morning-digest",
       title: "Morning Digest",
       description: "Summarize my open issues",
+      entry: "src/digest.ts",
       triggers: [
         { kind: "cron", expr: "0 9 * * 1-5", timezone: "America/Anchorage" },
         { kind: "webhook", auth: "token" },
@@ -62,12 +32,13 @@ describe("workflowManifestSchema — core", () => {
       permissions: { secrets: [{ name: "GITHUB_TOKEN" }] },
       env: { LOG_LEVEL: "info", GH_TOKEN: "${{ secrets.GITHUB_TOKEN }}" },
       workspace: { persist: ["memory/triager", "cache"] },
-      budget: { max_usd: 2.5, max_duration_seconds: 600, deadline_seconds: 86400 },
-      concurrency: { mode: "serial" },
-    } satisfies WorkflowMeta;
+      budget: { max_usd: 2.5, max_compute_seconds: 600 },
+      concurrency: { mode: "serial", key: "digest-${input.userId}" },
+      files: ["prompts/**", "data/seed.json"],
+    };
     // toEqual on the WHOLE object — the union-stripping failure mode this repo guards against drops
     // fields silently, so assert every input field survives AND the schema defaults land exactly.
-    expect(workflowManifestSchema.parse(full)).toEqual({
+    expect(parse(full)).toEqual({
       ...full,
       runs_on: "boardwalk/linux",
       callable_by: "anyone_in_org",
@@ -75,75 +46,129 @@ describe("workflowManifestSchema — core", () => {
   });
 
   it("rejects unknown fields (no silent drift)", () => {
-    expect(() => validateMeta({ ...MINIMAL, scripts: ["x"] })).toThrow(MetaValidationError);
-    expect(() => validateMeta({ ...MINIMAL, memory: true })).toThrow(MetaValidationError);
-    expect(() => validateMeta({ ...MINIMAL, instructions: "hi" })).toThrow(MetaValidationError);
+    expect(() => parse({ ...MINIMAL, scripts: ["x"] })).toThrow(/scripts/);
+    expect(() => parse({ ...MINIMAL, memory: true })).toThrow(/memory/);
+    expect(() => parse({ ...MINIMAL, instructions: "hi" })).toThrow(/instructions/);
     // Dropped 2026-06-11: capabilities (tools/mcp/skills) are per-agent (AgentOptions),
     // never manifest fields.
-    expect(() => validateMeta({ ...MINIMAL, tools: [{ name: "web_search" }] })).toThrow(
-      MetaValidationError,
-    );
-    expect(() => validateMeta({ ...MINIMAL, skills: ["triage-style"] })).toThrow(
-      MetaValidationError,
-    );
+    expect(() => parse({ ...MINIMAL, tools: [{ name: "web_search" }] })).toThrow(/tools/);
+    expect(() => parse({ ...MINIMAL, skills: ["triage-style"] })).toThrow(/skills/);
     expect(() =>
-      validateMeta({
+      parse({
         ...MINIMAL,
         mcp: [{ name: "m", transport: "http", url: "https://mcp.example.com" }],
       }),
-    ).toThrow(MetaValidationError);
+    ).toThrow(/mcp/);
     // Secrets moved into `permissions.secrets` — a top-level `secrets` is now an unknown field.
-    expect(() => validateMeta({ ...MINIMAL, secrets: [{ name: "GH" }] })).toThrow(
-      MetaValidationError,
-    );
+    expect(() => parse({ ...MINIMAL, secrets: [{ name: "GH" }] })).toThrow(/secrets/);
     // `permissions.tools` was removed — tools are per-agent only.
-    expect(() =>
-      validateMeta({ ...MINIMAL, permissions: { tools: [{ name: "web_search" }] } }),
-    ).toThrow(MetaValidationError);
+    expect(() => parse({ ...MINIMAL, permissions: { tools: [{ name: "web_search" }] } })).toThrow(
+      /tools/,
+    );
   });
 
   it("rejects bad slugs and missing triggers", () => {
-    expect(() => validateMeta({ slug: "has space", triggers: [{ kind: "manual" }] })).toThrow();
-    expect(() => validateMeta({ slug: "x", triggers: [] })).toThrow(/triggers/);
+    expect(() => parse({ slug: "has space", triggers: [{ kind: "manual" }] })).toThrow();
+    expect(() => parse({ slug: "x", triggers: [] })).toThrow(/triggers/);
   });
 
   it("rejects a top-level `name` (renamed to `slug`) and a multi-line title", () => {
-    expect(() => validateMeta({ ...MINIMAL, name: "morning-digest" })).toThrow(MetaValidationError);
-    expect(() => validateMeta({ ...MINIMAL, title: "line one\nline two" })).toThrow(
-      MetaValidationError,
+    expect(() => parse({ ...MINIMAL, name: "morning-digest" })).toThrow(/name/);
+    expect(() => parse({ ...MINIMAL, title: "line one\nline two" })).toThrow(/single line/);
+  });
+});
+
+describe("budget", () => {
+  it("accepts max_compute_seconds (active compute, not wall clock)", () => {
+    const m = parse({ ...MINIMAL, budget: { max_compute_seconds: 900 } });
+    expect(m.budget).toEqual({ max_compute_seconds: 900 });
+  });
+
+  it("rejects the deleted deadline_seconds as an unknown key", () => {
+    expect(() => parse({ ...MINIMAL, budget: { deadline_seconds: 86_400 } })).toThrow(
+      /deadline_seconds/,
     );
   });
 
-  it("collects every issue with its path in the error message", () => {
-    try {
-      validateMeta({ slug: "", triggers: [{ kind: "cron", expr: "bad" }] });
-      expect.unreachable();
-    } catch (e) {
-      expect(e).toBeInstanceOf(MetaValidationError);
-      // Narrow via instanceof instead of an `as Error` cast (owner directive: no casts in tests).
-      const message = e instanceof Error ? e.message : String(e);
-      expect(message).toContain("slug");
-      expect(message).toContain("triggers");
+  it("rejects the renamed max_duration_seconds as an unknown key", () => {
+    expect(() => parse({ ...MINIMAL, budget: { max_duration_seconds: 600 } })).toThrow(
+      /max_duration_seconds/,
+    );
+  });
+});
+
+describe("concurrency", () => {
+  it("accepts serial without a key (one run globally)", () => {
+    expect(parse({ ...MINIMAL, concurrency: { mode: "serial" } }).concurrency).toEqual({
+      mode: "serial",
+    });
+  });
+
+  it("accepts serial with a runtime-interpolated key (one run per resolved key)", () => {
+    const m = parse({
+      ...MINIMAL,
+      concurrency: { mode: "serial", key: "refund-${input.customerId}" },
+    });
+    expect(m.concurrency).toEqual({ mode: "serial", key: "refund-${input.customerId}" });
+  });
+
+  it("rejects the deleted serial_by_key mode", () => {
+    expect(() =>
+      parse({ ...MINIMAL, concurrency: { mode: "serial_by_key", key: "${input.id}" } }),
+    ).toThrow();
+  });
+
+  it("rejects a key on unlimited mode", () => {
+    expect(() => parse({ ...MINIMAL, concurrency: { mode: "unlimited", key: "x" } })).toThrow();
+  });
+
+  it("defaults to unlimited", () => {
+    expect(parse(MINIMAL).concurrency).toEqual({ mode: "unlimited" });
+  });
+});
+
+describe("entry and files", () => {
+  it("accepts a package-relative entry", () => {
+    expect(parse({ ...MINIMAL, entry: "src/main.ts" }).entry).toBe("src/main.ts");
+  });
+
+  it("defaults entry to undefined (per-language default resolved at deploy)", () => {
+    expect(parse(MINIMAL).entry).toBeUndefined();
+  });
+
+  it("rejects an absolute or escaping entry", () => {
+    for (const bad of ["/abs/index.ts", "../outside.ts", "src\\index.ts", "src/./index.ts"]) {
+      expect(() => parse({ ...MINIMAL, entry: bad })).toThrow();
+    }
+  });
+
+  it("accepts an allowlist of relative globs", () => {
+    const m = parse({ ...MINIMAL, files: ["prompts/**", "data/seed.json", "*.csv"] });
+    expect(m.files).toEqual(["prompts/**", "data/seed.json", "*.csv"]);
+  });
+
+  it("rejects empty, absolute, or escaping files globs", () => {
+    expect(() => parse({ ...MINIMAL, files: [] })).toThrow();
+    for (const bad of ["/etc/passwd", "../secrets/**", "a//b", ""]) {
+      expect(() => parse({ ...MINIMAL, files: [bad] })).toThrow();
     }
   });
 });
 
 describe("triggers", () => {
   it("accepts 5- and 6-field cron expressions, rejects others", () => {
-    const cron = (expr: string) => validateMeta({ ...MINIMAL, triggers: [{ kind: "cron", expr }] });
+    const cron = (expr: string) => parse({ ...MINIMAL, triggers: [{ kind: "cron", expr }] });
     expect(cron("0 9 * * 1-5").triggers[0]).toEqual({ kind: "cron", expr: "0 9 * * 1-5" });
     expect(cron("0 0 9 * * 1").triggers).toHaveLength(1);
     expect(() => cron("9 * *")).toThrow(/5 fields/);
   });
 
   it("rejects generic event triggers (only the specific workflow_run kind exists)", () => {
-    expect(() =>
-      validateMeta({ ...MINIMAL, triggers: [{ kind: "event", event_name: "x" }] }),
-    ).toThrow(MetaValidationError);
+    expect(() => parse({ ...MINIMAL, triggers: [{ kind: "event", event_name: "x" }] })).toThrow();
   });
 
   it("carries a cron trigger's static input through validation", () => {
-    const m = validateMeta({
+    const m = parse({
       ...MINIMAL,
       triggers: [{ kind: "cron", expr: "0 9 * * *", input: { mode: "full", limit: 10 } }],
     });
@@ -156,12 +181,12 @@ describe("triggers", () => {
 
   it("rejects a non-object cron input", () => {
     expect(() =>
-      validateMeta({ ...MINIMAL, triggers: [{ kind: "cron", expr: "0 9 * * *", input: "full" }] }),
-    ).toThrow(MetaValidationError);
+      parse({ ...MINIMAL, triggers: [{ kind: "cron", expr: "0 9 * * *", input: "full" }] }),
+    ).toThrow();
   });
 
   it("accepts a workflow_run trigger reacting to upstream workflows", () => {
-    const m = validateMeta({
+    const m = parse({
       ...MINIMAL,
       triggers: [{ kind: "workflow_run", workflows: ["ci", "lint"] }],
     });
@@ -169,7 +194,7 @@ describe("triggers", () => {
   });
 
   it("accepts a workflow_run conclusions filter", () => {
-    const m = validateMeta({
+    const m = parse({
       ...MINIMAL,
       triggers: [{ kind: "workflow_run", workflows: ["ci"], conclusions: ["success"] }],
     });
@@ -182,52 +207,47 @@ describe("triggers", () => {
 
   it("rejects a workflow_run with no upstream workflows, a bad conclusion, or an invalid slug", () => {
     expect(() =>
-      validateMeta({ ...MINIMAL, triggers: [{ kind: "workflow_run", workflows: [] }] }),
-    ).toThrow(MetaValidationError);
+      parse({ ...MINIMAL, triggers: [{ kind: "workflow_run", workflows: [] }] }),
+    ).toThrow();
     expect(() =>
-      validateMeta({
+      parse({
         ...MINIMAL,
         triggers: [{ kind: "workflow_run", workflows: ["ci"], conclusions: ["merged"] }],
       }),
-    ).toThrow(MetaValidationError);
+    ).toThrow();
     expect(() =>
-      validateMeta({ ...MINIMAL, triggers: [{ kind: "workflow_run", workflows: ["has space"] }] }),
-    ).toThrow(MetaValidationError);
+      parse({ ...MINIMAL, triggers: [{ kind: "workflow_run", workflows: ["has space"] }] }),
+    ).toThrow();
   });
 });
 
 describe("secrets and env", () => {
   it("a secret ref is exactly { name } — integration variants are rejected", () => {
     expect(() =>
-      validateMeta({
-        ...MINIMAL,
-        permissions: { secrets: [{ name: "T", integration: "github" }] },
-      }),
-    ).toThrow(MetaValidationError);
+      parse({ ...MINIMAL, permissions: { secrets: [{ name: "T", integration: "github" }] } }),
+    ).toThrow();
     expect(() =>
-      validateMeta({ ...MINIMAL, permissions: { secrets: [{ name: "T", from_role: "r" }] } }),
-    ).toThrow(MetaValidationError);
+      parse({ ...MINIMAL, permissions: { secrets: [{ name: "T", from_role: "r" }] } }),
+    ).toThrow();
   });
 
   it("the secret allowlist lives at permissions.secrets", () => {
-    const m = validateMeta({ ...MINIMAL, permissions: { secrets: [{ name: "GITHUB_TOKEN" }] } });
+    const m = parse({ ...MINIMAL, permissions: { secrets: [{ name: "GITHUB_TOKEN" }] } });
     expect(m.permissions?.secrets).toEqual([{ name: "GITHUB_TOKEN" }]);
   });
 
   it("allows any env var name — no reserved prefixes (the program owns process.env)", () => {
-    expect(validateMeta({ ...MINIMAL, env: { BOARDWALK_X: "1" } }).env).toEqual({
-      BOARDWALK_X: "1",
-    });
-    expect(validateMeta({ ...MINIMAL, env: { AWS_REGION: "us-east-1" } }).env).toEqual({
+    expect(parse({ ...MINIMAL, env: { BOARDWALK_X: "1" } }).env).toEqual({ BOARDWALK_X: "1" });
+    expect(parse({ ...MINIMAL, env: { AWS_REGION: "us-east-1" } }).env).toEqual({
       AWS_REGION: "us-east-1",
     });
   });
 
   it("allows whole-value secret references only", () => {
-    expect(validateMeta({ ...MINIMAL, env: { T: "${{ secrets.GH }}" } }).env).toEqual({
+    expect(parse({ ...MINIMAL, env: { T: "${{ secrets.GH }}" } }).env).toEqual({
       T: "${{ secrets.GH }}",
     });
-    expect(() => validateMeta({ ...MINIMAL, env: { T: "prefix-${{ secrets.GH }}" } })).toThrow(
+    expect(() => parse({ ...MINIMAL, env: { T: "prefix-${{ secrets.GH }}" } })).toThrow(
       /whole-value/,
     );
   });
@@ -235,38 +255,36 @@ describe("secrets and env", () => {
 
 describe("workspace.persist", () => {
   it("accepts true, false, and workspace-relative directory lists", () => {
-    expect(validateMeta({ ...MINIMAL, workspace: { persist: true } }).workspace).toEqual({
+    expect(parse({ ...MINIMAL, workspace: { persist: true } }).workspace).toEqual({
       persist: true,
     });
-    expect(
-      validateMeta({ ...MINIMAL, workspace: { persist: ["memory/a", "cache"] } }).workspace,
-    ).toEqual({ persist: ["memory/a", "cache"] });
+    expect(parse({ ...MINIMAL, workspace: { persist: ["memory/a", "cache"] } }).workspace).toEqual({
+      persist: ["memory/a", "cache"],
+    });
   });
 
   it("rejects escaping or absolute paths", () => {
     for (const bad of ["../outside", "a/../b", "/abs", "a\\b", "a//b", "."]) {
-      expect(() => validateMeta({ ...MINIMAL, workspace: { persist: [bad] } })).toThrow(
-        MetaValidationError,
-      );
+      expect(() => parse({ ...MINIMAL, workspace: { persist: [bad] } })).toThrow();
     }
   });
 });
 
 describe("recording", () => {
   it("defaults to undefined (recorded) and accepts the false opt-out", () => {
-    expect(validateMeta({ ...MINIMAL }).recording).toBeUndefined();
-    expect(validateMeta({ ...MINIMAL, recording: false }).recording).toBe(false);
-    expect(validateMeta({ ...MINIMAL, recording: true }).recording).toBe(true);
+    expect(parse({ ...MINIMAL }).recording).toBeUndefined();
+    expect(parse({ ...MINIMAL, recording: false }).recording).toBe(false);
+    expect(parse({ ...MINIMAL, recording: true }).recording).toBe(true);
   });
 
   it("rejects a non-boolean recording value", () => {
-    expect(() => validateMeta({ ...MINIMAL, recording: "off" })).toThrow(MetaValidationError);
+    expect(() => parse({ ...MINIMAL, recording: "off" })).toThrow();
   });
 });
 
 describe("platform-extension fields", () => {
   it("validates egress, callable_by, notifications round-trip with toEqual", () => {
-    const m = validateMeta({
+    const m = parse({
       ...MINIMAL,
       egress: { level: "custom", allow: ["api.github.com"] },
       callable_by: { roles: ["admin", "member"] },
@@ -275,10 +293,7 @@ describe("platform-extension fields", () => {
         { on: "budget_exceeded", channel: "email", target: "ops@example.com" },
       ],
     });
-    expect(m.egress).toEqual({
-      level: "custom",
-      allow: ["api.github.com"],
-    });
+    expect(m.egress).toEqual({ level: "custom", allow: ["api.github.com"] });
     expect(m.callable_by).toEqual({ roles: ["admin", "member"] });
     expect(m.notifications).toEqual([
       { on: "failure", channel: "email", target: "ops@example.com" },
@@ -288,19 +303,19 @@ describe("platform-extension fields", () => {
 
   it("rejects a template on budget_exceeded notifications", () => {
     expect(() =>
-      validateMeta({
+      parse({
         ...MINIMAL,
         notifications: [
           { on: "budget_exceeded", channel: "email", target: "x@y.z", template: "t" },
         ],
       }),
-    ).toThrow(MetaValidationError);
+    ).toThrow();
   });
 });
 
 describe("runs_on self-hosted pool default", () => {
   it("fills pool with 'default' when omitted (the pool `boardwalk runner start` creates)", () => {
-    const parsed = workflowManifestSchema.parse({
+    const parsed = parse({
       slug: "on-my-metal",
       triggers: [{ kind: "manual" }],
       runs_on: { kind: "self-hosted" },
@@ -309,7 +324,7 @@ describe("runs_on self-hosted pool default", () => {
   });
 
   it("keeps an explicit pool + labels", () => {
-    const parsed = workflowManifestSchema.parse({
+    const parsed = parse({
       slug: "on-my-metal",
       triggers: [{ kind: "manual" }],
       runs_on: { kind: "self-hosted", pool: "gpu-fleet", labels: ["gpu"] },

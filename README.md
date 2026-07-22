@@ -3,34 +3,38 @@
 Author **Boardwalk workflows** in plain TypeScript — agent loops, schedules, durable sleeps, and cross-workflow composition, in a single program file that runs identically on your laptop, your own server, or the hosted Boardwalk platform.
 
 ```ts
-import { agent, output, secrets, type WorkflowMeta } from "@boardwalk-labs/workflow";
+// src/index.ts — the entry: export a run function, the platform calls it.
+import { agent, secrets } from "@boardwalk-labs/workflow";
 
-export const meta = {
-  slug: "morning-digest",
-  title: "Morning Digest",
-  description: "Summarize my open issues every weekday at 9am",
-  triggers: [{ kind: "cron", expr: "0 9 * * 1-5" }],
-  permissions: { secrets: [{ name: "GITHUB_TOKEN" }] },
-} satisfies WorkflowMeta;
+export default async function run(): Promise<string> {
+  const token = await secrets.get("GITHUB_TOKEN");
+  const issues = await fetch("https://api.github.com/issues", {
+    headers: { Authorization: `Bearer ${token}` },
+  }).then((r) => r.text());
 
-const token = await secrets.get("GITHUB_TOKEN");
-const issues = await fetch("https://api.github.com/issues", {
-  headers: { Authorization: `Bearer ${token}` },
-}).then((r) => r.text());
-
-const summary = await agent(`Summarize for a morning digest:\n${issues}`);
-output(summary);
+  return await agent(`Summarize for a morning digest:\n${issues}`);
+}
 ```
 
-A workflow is **a script**: the `meta` export is a **pure literal** (engines derive the manifest from it statically, without executing your code), and the module body is the program — importing the file is running it. Top-level `await` is the norm; `output(value)` declares the result. Ordinary TypeScript throughout: any import, any control flow, any npm dependency.
+```jsonc
+// workflow.jsonc — the deployment descriptor, read by the control plane as data.
+{
+  "slug": "morning-digest",
+  "title": "Morning Digest",
+  "description": "Summarize my open issues every weekday at 9am",
+  "triggers": [{ "kind": "cron", "expr": "0 9 * * 1-5" }],
+  "permissions": { "secrets": [{ "name": "GITHUB_TOKEN" }] },
+}
+```
+
+A workflow is **a typed function plus a small descriptor**: your behavior is the `run` function (input is param 0, the output is the return value — Lambda-style), and deployment policy (triggers, permissions, budget, concurrency) lives in `workflow.jsonc`, which the control plane reads without ever executing your code. Ordinary TypeScript throughout: any import, any control flow, any npm dependency.
 
 ## What's in this package
 
-| Import                             | What it is                                                                                                                                                                                                    |
-| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `@boardwalk-labs/workflow`         | The author API: `agent()`, `sleep()`, `workflows.call()`, `secrets.get()`, `artifacts.write()`, `parallel()`, `input` / `output()` / `config`, `phase()` — plus the manifest schema and run-event wire format |
-| `@boardwalk-labs/workflow/runtime` | The **engine-facing** API: install a `WorkflowHost` before evaluating a program. Authors never import this                                                                                                    |
-| `@boardwalk-labs/workflow/extract` | Static `meta` → manifest extraction (AST-based, never executes the program). Used by engines and tooling                                                                                                      |
+| Import                             | What it is                                                                                                                                                                                                                                             |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `@boardwalk-labs/workflow`         | The author API: `agent()`, `sleep()`, `workflows.call()`, `secrets.get()`, `artifacts.write()`, `parallel()`, `phase()`, `installTestHost()` — plus the manifest schema, `workflow.jsonc` descriptor parsing/validation, and the run-event wire format |
+| `@boardwalk-labs/workflow/runtime` | The **engine/loader-facing** API: the program↔host protocol schemas and client. Authors never import this                                                                                                                                              |
 
 ## The primitives
 
@@ -38,7 +42,7 @@ A workflow is **a script**: the `meta` export is a **pure literal** (engines der
 - **`sleep(ms | { until })`** — durable wait. On hosted runners a short wait holds and a long one suspends (the machine is snapshotted and released, then restored on wake — locals survive either way, and suspended idle time is not billed). Engines without a snapshot substrate (local dev, self-hosted runners) hold the process for the whole wait. Plain `Date.now()` / `Math.random()` / `crypto.randomUUID()` work like ordinary TypeScript — a suspended run resumes with its exact program state.
 - **`workflows.call(slug, input)`** — durably invoke another workflow by its slug and await its result; idempotent across restarts. `workflows.run` is the fire-and-forget sibling.
 - **`secrets.get(name)`** — read a secret declared in `permissions.secrets`. Resolved from your `.env` locally, from the encrypted vault on hosted Boardwalk. Secret values never reach model context — the SDK contract requires engines to redact them.
-- **`output(value)`** — declare the run's result.
+- **The return value** — your `run` function's return is the run's output, persisted and handed to `workflows.call` parents.
 - **Memory = a persistent directory, per agent.** `agent(prompt, { memory: "memory/triager" })` names any workspace-relative directory; the engine auto-persists it across runs — no declaration needed. The loop gets read/write file tools scoped to it, and your code can read and write the same files. (`workspace.persist` is the separate knob for non-memory state your program manages directly.)
 
 ## Where workflows run
