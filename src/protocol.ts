@@ -363,13 +363,15 @@ const humanInputSpecSchema = z.discriminatedUnion("kind", [
   }),
   z.strictObject({
     kind: z.literal("choice"),
-    options: z.array(z.string()).readonly(),
+    // An empty options list is never meaningful — requiring >=1 at the wire keeps both servers
+    // rejecting it identically (INVALID_PARAMS) instead of divergent fallback behavior.
+    options: z.array(z.string()).min(1).readonly(),
     allowOther: z.boolean().optional(),
     otherLabel: z.string().optional(),
   }),
   z.strictObject({
     kind: z.literal("multiselect"),
-    options: z.array(z.string()).readonly(),
+    options: z.array(z.string()).min(1).readonly(),
     allowOther: z.boolean().optional(),
     otherLabel: z.string().optional(),
     min: z.number().optional(),

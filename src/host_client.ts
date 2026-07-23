@@ -27,6 +27,7 @@ import {
   HostError,
   clientToHostRequests,
   contextDataSchema,
+  hostToClientNotifications,
   hostToClientRequests,
   rpcFrameSchema,
   type AgentWireOptions,
@@ -471,7 +472,7 @@ export class HostClient implements HostInterface {
     const frame = parsed.data;
     if ("method" in frame) {
       if ("id" in frame) this.onIncomingRequest(frame.id, frame.method, frame.params);
-      else this.onIncomingNotification(frame.method);
+      else this.onIncomingNotification(frame.method, frame.params);
       return;
     }
     if ("error" in frame) {
@@ -495,9 +496,12 @@ export class HostClient implements HostInterface {
     apply(entry);
   }
 
-  private onIncomingNotification(method: string): void {
+  private onIncomingNotification(method: string, params: unknown): void {
     if (method === "cancel") {
-      this.cancelController.abort(new HostError("CANCELLED", "the run was cancelled"));
+      // Surface the host's reason on `signal.reason` (parity with the Python SDK).
+      const parsed = hostToClientNotifications.cancel.params.safeParse(params ?? {});
+      const reason = parsed.success ? parsed.data.reason : undefined;
+      this.cancelController.abort(new HostError("CANCELLED", reason ?? "the run was cancelled"));
     }
     // Unknown notifications are ignored (additive forward-compat).
   }
