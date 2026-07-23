@@ -262,3 +262,15 @@ describe("validateConcurrencyKeyTemplate", () => {
     expect(issues[1]?.message).toMatch(/function calls/);
   });
 });
+
+describe("$schema tolerance", () => {
+  it("strips the editor-validation $schema key instead of rejecting it", () => {
+    const d = parseWorkflowDescriptor(`{
+      "$schema": "https://boardwalk.sh/schemas/workflow.json",
+      "slug": "with-schema-key",
+      "triggers": [{ "kind": "manual" }],
+    }`);
+    expect(d.slug).toBe("with-schema-key");
+    expect("$schema" in d).toBe(false);
+  });
+});

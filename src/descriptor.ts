@@ -152,10 +152,16 @@ export function parseWorkflowDescriptor(text: string): WorkflowDescriptor {
     );
   }
 
+  // `$schema` is the standard editor-validation hook (the docs' example carries
+  // `https://boardwalk.sh/schemas/workflow.json`) — author-facing only, stripped here exactly
+  // like comments, never stored, never part of the contract.
+  const descriptorRecord = { ...(raw as Record<string, unknown>) };
+  delete descriptorRecord["$schema"];
+
   // The derived-field check runs FIRST for a precise message — the strict schema would only say
   // "unrecognized key".
   for (const field of DERIVED_FIELDS) {
-    if (field in raw) {
+    if (field in descriptorRecord) {
       throw new DescriptorValidationError(
         `\`${field}\` is build-derived from your run function's signature and never ` +
           "hand-written — remove it from workflow.jsonc",
@@ -163,7 +169,7 @@ export function parseWorkflowDescriptor(text: string): WorkflowDescriptor {
     }
   }
 
-  const result = workflowDescriptorSchema.safeParse(raw);
+  const result = workflowDescriptorSchema.safeParse(descriptorRecord);
   if (!result.success) {
     const issues = result.error.issues
       .map((i) => `  ${i.path.length > 0 ? i.path.join(".") : "(root)"}: ${i.message}`)
